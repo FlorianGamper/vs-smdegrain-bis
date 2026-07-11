@@ -1,0 +1,62 @@
+# smdegrain-bis — the pure-Python filter package (py3-none-any).
+#
+# The compiled UHDhalf scaler is a SEPARATE distribution, `vapoursynth-mvuscale`
+# (see native/pyproject.toml), pulled in by the `uhdhalf` extra. Keeping this
+# package pure means one universal wheel and trivial CI; only mvuscale needs the
+# per-platform build matrix.
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "smdegrain-bis"
+dynamic = ["version"]
+description = "VapourSynth motion-compensated temporal denoiser (SMDegrain lineage, mvutensils backend)"
+readme = "README.md"
+requires-python = ">=3.8"
+license = "GPL-3.0-or-later"
+authors = [{ name = "Florian Gamper" }]
+keywords = [
+    "vapoursynth", "denoise", "smdegrain", "mvutensils",
+    "motion-compensation", "temporal-denoise", "video",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Topic :: Multimedia :: Video",
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+# The motion backend. VapourSynth itself is assumed present (users bring their
+# own VS); vapoursynth-mvutensils pulls a compatible `vapoursynth` if pip-managed.
+dependencies = [
+    "vapoursynth-mvutensils>=2",
+]
+
+[project.optional-dependencies]
+# UHDhalf motion search needs the native scaler (per-platform wheel).
+uhdhalf = ["vapoursynth-mvuscale"]
+# Optional acceleration / prefilter paths that the filter imports lazily.
+extras  = ["vsrgtools", "vs-dfttest2"]
+
+[project.urls]
+Homepage = "https://github.com/FlorianGamper/vs-smdegrain-bis"
+Changelog = "https://github.com/FlorianGamper/vs-smdegrain-bis/blob/main/CHANGELOG.md"
+
+[tool.hatch.version]
+path = "smdegrain_bis/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+# Ships the package incl. its byte-identical vendored upstream files (vendor/).
+packages = ["smdegrain_bis"]
+
+[tool.hatch.build.targets.sdist]
+# Source dist carries the package + the native scaler sources so the mvuscale
+# wheel can also be built from the sdist tree if desired.
+include = [
+    "smdegrain_bis/**",
+    "native/**",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+]

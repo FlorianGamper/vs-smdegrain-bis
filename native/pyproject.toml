@@ -1,0 +1,54 @@
+# vapoursynth-mvuscale — the compiled UHDhalf vector scaler for smdegrain_bis,
+# distributed as a per-platform wheel whose payload is a bare VS plugin under
+# vapoursynth/plugins/mvuscale/ (identical layout to vapoursynth-manipmv et al.).
+# This is a SEPARATE distribution from the pure-Python `smdegrain-bis` package.
+#
+# Build one wheel:   pip wheel native/ -w dist/
+# Build the matrix:  cibuildwheel native/     (see [tool.cibuildwheel] below)
+
+[build-system]
+requires = ["scikit-build-core>=0.10"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "vapoursynth-mvuscale"
+version = "0.1.0"
+description = "Native VapourSynth (API4) filter that scales mvutensils motion vectors for smdegrain_bis UHDhalf"
+readme = "README.md"
+requires-python = ">=3.8"
+license = "GPL-3.0-or-later"
+authors = [{ name = "Florian Gamper" }]
+keywords = ["vapoursynth", "mvutensils", "motion-vectors", "denoise", "smdegrain"]
+classifiers = [
+    "Topic :: Multimedia :: Video",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+]
+
+[project.urls]
+Homepage = "https://github.com/FlorianGamper/vs-smdegrain-bis"
+
+[tool.scikit-build]
+minimum-version = "0.10"
+# The payload has no CPython extension (no libpython link), so one wheel serves
+# all Python 3.x on a platform. py-api = "py3" tags it none-ABI accordingly.
+wheel.py-api = "py3"
+build-dir = "build/{wheel_tag}"
+
+[tool.cibuildwheel]
+# The .so is Python-version-independent, so build with a single interpreter per
+# platform rather than the full cpXX matrix.
+build = "cp312-*"
+skip = "*_i686 *-musllinux_i686"
+build-frontend = "build"
+# The .so links only libstdc++/gcc/c/m — all present in the 2_28 image, so
+# auditwheel repair is effectively a no-op (no bundled sidecar libs).
+manylinux-x86_64-image = "manylinux_2_28"
+manylinux-aarch64-image = "manylinux_2_28"
+
+# Build BOTH macOS arches on one (arm64) runner — clang cross-compiles the x86_64
+# .dylib via CMAKE_OSX_ARCHITECTURES, so we don't depend on the scarce/deprecated
+# Intel `macos-13` runner. (No tests in the wheel build, so cross-arch is fine.)
+[tool.cibuildwheel.macos]
+archs = ["x86_64", "arm64"]

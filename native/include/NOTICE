@@ -1,0 +1,13 @@
+VapourSynth API4 headers — vendored verbatim so the mvuscale native filter
+builds without a VapourSynth SDK installed (self-contained CI).
+
+Source: the `vapoursynth` distribution's `vapoursynth/include/` directory.
+Copyright (c) 2012-2026 Fredrik Mellbin.
+
+  VapourSynth4.h   LGPL-2.1-or-later
+  VSConstants4.h   LGPL-2.1-or-later
+  VSHelper4.h      WTFPL (Do What The Fuck You Want To Public License, v2)
+
+Both licences are compatible with this project's GPL-3.0-or-later, and merely
+#including these API headers to build a plugin is their intended use. They are
+not modified. To refresh, copy them from a current `vapoursynth` install.

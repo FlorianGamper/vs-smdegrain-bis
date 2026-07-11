@@ -1,0 +1,41 @@
+Vendored third-party VapourSynth script
+=======================================
+
+sharpen.py in this directory is a BYTE-IDENTICAL copy of a community VapourSynth
+script, redistributed here for convenience. It is NOT authored by the
+smdegrain_bis project and is kept unmodified.
+
+Source of the copy
+------------------
+Selur — VapoursynthScriptsInHybrid
+https://github.com/Selur/VapoursynthScriptsInHybrid
+Pinned at commit aa7e2f01e20834e8eda038bdd3225bfd7636d8b1 (2026-07-10).
+
+Selur curates and maintains this collection; the individual functions are
+authored by the people credited in the file's own header.
+
+Per-file attribution (from the file header + well-known provenance)
+-------------------------------------------------------------------
+sharpen.py
+  - LSFmod (LimitedSharpenFaster MOD) — "LaTo INV."
+  - DetailSharpen and related — Didée (doom9 forum)
+  - Padding / MinBlur / sbr / ContraSharpening / LimitFilter / GetPlane / cround /
+    scale — from havsfunc / Dogway / the VapourSynth scripting community.
+
+Licence
+-------
+This upstream file carries per-function author credits but NO explicit licence
+statement. It is a long-standing, publicly shared community script, re-vendored
+across the VapourSynth ecosystem (havsfunc, muvsfunc, ...). It is included here
+under that established community-sharing practice and its evident GPL lineage
+(much of the code derives from GPL works such as havsfunc), consistent with this
+project's GPL-3.0-or-later licence. If any author objects to their redistribution,
+contact the maintainer and the file will be removed or replaced with a packaged
+dependency.
+
+Usage
+-----
+smdegrain_bis uses a subset of sharpen.py: Padding, MinBlur, sbr, ContraSharpening,
+GetPlane, cround, scale, LSFmod, LimitFilter. It is imported namespaced as
+smdegrain_bis.vendor.sharpen (never a top-level `sharpen`) and vendored whole so it
+stays byte-identical to upstream.

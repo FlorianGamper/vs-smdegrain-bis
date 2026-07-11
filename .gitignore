@@ -1,0 +1,13 @@
+# Installed as the public repo's .gitignore by publish/publish.sh.
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+
+# build outputs
+build/
+dist/
+wheelhouse/
+*.so
+*.dylib
+*.dll

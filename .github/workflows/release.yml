@@ -1,0 +1,92 @@
+# PUBLIC repo release workflow. Installed into the public repo's
+# .github/workflows/release.yml by publish/publish.sh (it does not run in the
+# private dev repo). Publishes BOTH distributions to PyPI via OIDC trusted
+# publishing — no stored tokens:
+#
+#   Tag v* (e.g. v0.1.0rc1 then v0.1.0). The VERSION in smdegrain_bis/__init__.py
+#   decides: a PEP 440 pre-release (0.1.0rc1) publishes but pip skips it without
+#   --pre; a final (0.1.0) is a normal release.
+#
+# smdegrain-bis and vapoursynth-mvuscale are separate PyPI projects published from
+# ONE repo + workflow, so each publish job uses a DISTINCT GitHub Environment
+# (`pypi` and `pypi-mvuscale`). PyPI trusted publishing keys on
+# (owner, repo, workflow, environment), and *pending* publishers must be unique on
+# that tuple — distinct environments are what let the two projects register
+# non-colliding pending publishers. Configure each project's trusted publisher on
+# PyPI to match: repo FlorianGamper/vs-smdegrain-bis, workflow release.yml,
+# environment `pypi` (smdegrain-bis) / `pypi-mvuscale` (vapoursynth-mvuscale).
+#
+# Action pins are node24-capable (verified against GitHub); bump periodically.
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  mvuscale-wheels:
+    name: mvuscale wheels (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pypa/cibuildwheel@v4.1.0
+        with:
+          package-dir: native
+          output-dir: dist
+      - uses: actions/upload-artifact@v6
+        with:
+          name: dist-mvuscale-${{ matrix.os }}
+          path: dist/*.whl
+
+  mvuscale-sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: pipx run build --sdist --outdir dist native
+      - uses: actions/upload-artifact@v6
+        with:
+          name: dist-mvuscale-sdist
+          path: dist/*.tar.gz
+
+  smdegrain-bis-dists:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: pipx run build --wheel --sdist --outdir dist
+      - uses: actions/upload-artifact@v6
+        with:
+          name: dist-smdegrain-bis
+          path: dist/*
+
+  publish-mvuscale:
+    needs: [mvuscale-wheels, mvuscale-sdist]
+    runs-on: ubuntu-latest
+    environment: pypi-mvuscale         # distinct env → non-colliding trusted publisher
+    permissions:
+      id-token: write        # OIDC trusted publishing
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: dist-mvuscale-*
+          path: dist
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  publish-smdegrain-bis:
+    needs: [smdegrain-bis-dists]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: dist-smdegrain-bis
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
