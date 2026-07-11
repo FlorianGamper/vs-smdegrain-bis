@@ -4,6 +4,13 @@ Notable changes to `smdegrain_bis`. Format follows
 [Keep a Changelog](https://keepachangelog.com/); the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.1] — 2026-07-11
+
+### Changed
+- Internal cleanup, no behaviour change: dropped a dead `_native/` plugin-load candidate from
+  `_ensure_mvuscale` (the scaler is located via the `vapoursynth-mvuscale` package metadata),
+  de-duplicated the `call_dfttest` kwargs, and removed an unused `libmvuscale` filename variant.
+
 ## [0.1.0] — 2026-07-11
 
 First public release. `smdegrain_bis` is a **VapourSynth** motion-compensated temporal denoiser in the

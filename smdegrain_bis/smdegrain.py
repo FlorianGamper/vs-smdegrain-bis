@@ -72,19 +72,15 @@ def call_dfttest(clip, *, slocation, tbsize=1, planes=None):
     `vs-dfttest2` pip module. Catching ImportError keeps the filter working
     where the plugin is present but the Python wrapper isn't installed.
     """
-    if hasattr(core, 'dfttest2_nvrtc'):
-        try:
-            import dfttest2
-            kw = {'tbsize': tbsize, 'slocation': slocation,
-                  'backend': dfttest2.Backend.NVRTC}
-            if planes is not None:
-                kw['planes'] = planes
-            return dfttest2.DFTTest(clip, **kw)
-        except ImportError:
-            pass  # vs-dfttest2 pip wrapper missing — fall through
     kw = {'tbsize': tbsize, 'slocation': slocation}
     if planes is not None:
         kw['planes'] = planes
+    if hasattr(core, 'dfttest2_nvrtc'):
+        try:
+            import dfttest2
+            return dfttest2.DFTTest(clip, backend=dfttest2.Backend.NVRTC, **kw)
+        except ImportError:
+            pass  # vs-dfttest2 pip wrapper missing — fall through
     return core.dfttest.DFTTest(clip, **kw)
 
 
@@ -248,21 +244,21 @@ def _ensure_mvuscale(core):
     A host that manages plugins itself (a VapourSynth plugins dir / vsrepo) will
     have autoloaded it already, so this is a no-op. Otherwise load the plugin the
     ``vapoursynth-mvuscale`` wheel installed — located *precisely* from that
-    distribution's file metadata, not by scanning search paths — or a copy bundled
-    beside this package, so a plain ``pip install smdegrain-bis[uhdhalf]`` works
-    with no manual step. Set ``MVUSCALE_PLUGIN`` to an explicit path to override.
+    distribution's file metadata, not by scanning search paths — so a plain
+    ``pip install smdegrain-bis[uhdhalf]`` works with no manual step. Set
+    ``MVUSCALE_PLUGIN`` to an explicit path to override.
     Silent on failure — the caller re-checks ``hasattr(core, 'mvuscale')`` and
     raises a clear error if still missing.
 
-    Security: candidate paths come only from the explicit env override, the
-    ``vapoursynth-mvuscale`` distribution's recorded files, and this package's own
-    directory — never from an unqualified search path (which could include the CWD
-    and let a planted ``libmvuscale.so`` be dlopen'd).
+    Security: candidate paths come only from the explicit env override and the
+    ``vapoursynth-mvuscale`` distribution's recorded files — never from an
+    unqualified search path (which could include the CWD and let a planted
+    ``libmvuscale.so`` be dlopen'd).
     """
     if hasattr(core, 'mvuscale'):
         return
     import os
-    libnames = ('libmvuscale.so', 'mvuscale.dll', 'libmvuscale.dylib', 'mvuscale.so')
+    libnames = ('libmvuscale.so', 'mvuscale.dll', 'libmvuscale.dylib')
 
     def _candidates():
         env = os.environ.get('MVUSCALE_PLUGIN')       # explicit, trusted override
@@ -275,9 +271,6 @@ def _ensure_mvuscale(core):
                     yield os.fspath(f.locate())
         except Exception:
             pass
-        here = os.path.dirname(os.path.abspath(__file__))   # a copy bundled with this package
-        for name in libnames:
-            yield os.path.join(here, '_native', name)
 
     for path in _candidates():
         if path and os.path.isfile(path):

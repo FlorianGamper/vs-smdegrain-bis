@@ -15,4 +15,4 @@ lineage, the mvtools→mvutensils port, and how it works.
 from .smdegrain import SMDegrain
 
 __all__ = ["SMDegrain"]
-__version__ = "0.1.0"
+__version__ = "0.1.1"
