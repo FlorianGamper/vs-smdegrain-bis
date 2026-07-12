@@ -70,7 +70,11 @@ den = SMDegrain(clip, tr=2, UHDhalf=True)                   # 4K: half-res motio
 ```
 
 `UHDhalf` (default `True`) engages only on sources above **2599×1499**; below that it is a no-op. When
-it engages it requires the `mvuscale` plugin (the `[uhdhalf]` extra, or a self-built `.so`).
+it engages it requires the `mvuscale` plugin (the `[uhdhalf]` extra, or a self-built `.so`), and the
+source width **and** height must be **divisible by 4**: the half-res search size is forced to even, so
+on a non-mod-4 source the ×2-scaled vectors no longer match the full-res render super and graph
+construction fails cleanly with `Degrain: The motion vectors passed are not compatible with the super
+clip`. Crop/pad to mod-4 upstream, or set `UHDhalf=False` for such sources.
 
 ---
 
@@ -85,7 +89,7 @@ it engages it requires the `mvuscale` plugin (the `[uhdhalf]` extra, or a self-b
 | `pel` | auto | motion precision (½/¼-pel); auto = `1` on UHD, `2` otherwise |
 | `prefilter` | `-1` | motion-search prefilter (`-1` MinBlur … `5` BM3D, or a clip) |
 | `contrasharp` | auto | contra-sharpen the result toward the source |
-| `UHDhalf` | `True` | half-resolution motion search on >2599×1499 sources |
+| `UHDhalf` | `True` | half-resolution motion search on >2599×1499 sources (dimensions must be mod-4) |
 | `LFR` | `False` | low-frequency detail restore, gated by a `SADMask` |
 | `DCTFlicker` | `False` | recursive flicker-calming pass |
 | `interlaced` | auto | auto-detected from `_FieldBased`; set `False` to force progressive |

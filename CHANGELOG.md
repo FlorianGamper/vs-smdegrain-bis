@@ -4,6 +4,23 @@ Notable changes to `smdegrain_bis`. Format follows
 [Keep a Changelog](https://keepachangelog.com/); the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.2] — 2026-07-12
+
+### Fixed
+- **DCTFlicker: the recursive LF-band pass no longer inherits `UHDhalf=True`.** The inner
+  `SMDegrain()` call guarded `LFR`/`DCTFlicker` but not `UHDhalf` (whose signature default is
+  `True`), so on UHD-class sources the low-frequency band got a second half-res motion search +
+  `mvuscale` vector-scale pass. Dogway's reference (smdegrain-4x.avsi:495) runs that pass at full
+  resolution. Output of `DCTFlicker=True` on UHD-class sources changes accordingly; all other
+  paths are byte-identical (verified by A/B render).
+
+### Documentation
+- **`UHDhalf` requires mod-4 source dimensions** (now documented in the README). The half-res
+  search size is forced to even, so on sources whose width or height is not divisible by 4 the
+  ×2-scaled vectors no longer match the full-res render super and graph construction fails cleanly
+  with `Degrain: The motion vectors passed are not compatible with the super clip`. Crop/pad to
+  mod-4 or set `UHDhalf=False`. (Behaviour unchanged — this documents an existing limitation.)
+
 ## [0.1.1] — 2026-07-11
 
 ### Changed

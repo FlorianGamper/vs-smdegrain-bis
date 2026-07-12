@@ -672,7 +672,11 @@ def SMDegrain(input, tr=2, thSAD=300, thSADC=None, RefineMotion=False, contrasha
         # mfilter flows into the recursion; chroma=False because the LF
         # restore consumes plane=0 only and chroma motion search on a
         # Gaussian-blurred band would be wasted compute. Recursion guard
-        # via explicit LFR=False, DCTFlicker=False on the inner call.
+        # via explicit LFR=False, DCTFlicker=False on the inner call;
+        # UHDhalf=False too — the signature default is True, so on a UHD
+        # source the recursion would otherwise run a SECOND half-res
+        # motion search + ScaleVect pass on the LF band, which avsi:495
+        # does not do (the LF-band pass is a full-resolution denoise).
         if DCTFlicker_active:
             DCTF_pass = SMDegrain(
                 mfilter,                      # avsi:495 — was inputP
@@ -689,6 +693,8 @@ def SMDegrain(input, tr=2, thSAD=300, thSADC=None, RefineMotion=False, contrasha
                 plane        = 0,
                 chroma       = False,         # avsi:495 — drop wasted chroma MV
                 truemotion   = False,
+                UHDhalf      = False,         # recursion guard (avsi:495 —
+                                              # LF-band pass is full-res)
                 LFR          = False,         # recursion guard
                 DCTFlicker   = False,         # recursion guard
             )
