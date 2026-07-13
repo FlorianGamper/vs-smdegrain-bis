@@ -11,9 +11,8 @@ while detail and edges stay put. Runs on [mvutensils](https://github.com/myrsloi
 ![Python: 3.8+](https://img.shields.io/badge/python-3.8%2B-3776ab)
 ![Backend: mvutensils](https://img.shields.io/badge/backend-mvutensils%20(core.mvu)-6aa84f)
 
-> **Status: pre-release.** The filter is complete and validated across the pel × tr × UHD × LFR ×
-> interlaced grid. Packaging is in place; PyPI publishing is pending — until then, install from source
-> (see [Install](#install)).
+> **Status: released.** The filter is complete and validated across the pel × tr × UHD × LFR ×
+> interlaced grid, and is on PyPI (see [Install](#install)).
 
 ---
 
@@ -90,8 +89,8 @@ clip`. Crop/pad to mod-4 upstream, or set `UHDhalf=False` for such sources.
 | `prefilter` | `-1` | motion-search prefilter (`-1` MinBlur … `5` BM3D, or a clip) |
 | `contrasharp` | auto | contra-sharpen the result toward the source |
 | `UHDhalf` | `True` | half-resolution motion search on >2599×1499 sources (dimensions must be mod-4) |
-| `LFR` | `False` | low-frequency detail restore, gated by a `SADMask` |
-| `DCTFlicker` | `False` | recursive flicker-calming pass |
+| `LFR` | `False` | low-frequency detail restore, gated by a `SADMask` — ⚠️ **unsafe on mvutensils v2, [see below](#low-frequency-restore--de-flicker-lfr--dctflicker)** |
+| `DCTFlicker` | `False` | recursive flicker-calming pass (requires `LFR`, so the same warning applies) |
 | `interlaced` | auto | auto-detected from `_FieldBased`; set `False` to force progressive |
 | `tv_range` | auto | auto-detected from the range frame-prop |
 | `tonemap_fn` | `None` | caller-supplied HDR tonemapper (search only) |
@@ -144,6 +143,21 @@ den = SMDegrain(clip, prefilter=my_pref)
 ```
 
 ### Low-frequency restore & de-flicker (`LFR` / `DCTFlicker`)
+
+> [!WARNING]
+> **Do not use `LFR` (or `DCTFlicker`) with mvutensils v2 — it can corrupt the heap.**
+> `LFR` gates its restore with a motion-confidence mask built by `mvu.SADMask`, and that filter has a
+> **data race** in mvutensils v2:
+> [myrsloik/mvutensils#5](https://github.com/myrsloik/mvutensils/issues/5) (open). `SADMask`,
+> `VectorLengthMask` and `OcclusionMask` all register as `fmParallel` but share one filter-instance
+> zimg scratch buffer, so parallel frame requests scribble over each other. A multi-threaded render of
+> real content dies with `double free or corruption`, a segfault, or `std::system_error` at
+> nondeterministic frames.
+>
+> It is **clean single-threaded** — so it is invisible to `core.num_threads = 1` runs and to
+> `vspipe --info`, and only shows up in a real encode. Leave `LFR=False` (the default) until the issue
+> is fixed upstream. Everything else in this filter is unaffected: `SADMask` is the only one of the
+> three the pipeline touches, and only when `LFR` is on.
 
 Back-ported v4.x finishing for high-`tr` / high-`thSAD` (or `truemotion`) runs, where strong temporal
 averaging can eat low-frequency detail:

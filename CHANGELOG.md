@@ -4,6 +4,19 @@ Notable changes to `smdegrain_bis`. Format follows
 [Keep a Changelog](https://keepachangelog.com/); the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.3] — 2026-07-13
+
+### Documentation
+- **Known issue: `LFR` / `DCTFlicker` are unsafe on mvutensils v2** — documented in the README.
+  `LFR` gates its restore with a mask from `mvu.SADMask`, and that filter has a **data race** in
+  mvutensils v2 ([myrsloik/mvutensils#5](https://github.com/myrsloik/mvutensils/issues/5), open):
+  `SADMask`, `VectorLengthMask` and `OcclusionMask` register as `fmParallel` yet share a single
+  filter-instance zimg scratch buffer, so concurrent frame requests corrupt the heap — `double free
+  or corruption`, SIGSEGV, or `std::system_error` at nondeterministic frames in a multi-threaded
+  render of real content. It is clean single-threaded, hence invisible to `core.num_threads = 1` runs
+  and to `vspipe --info`. Keep `LFR=False` (the default) until the upstream fix lands. No code change
+  — `SADMask` is the only one of the three filters this pipeline uses, and only when `LFR` is on.
+
 ## [0.1.2] — 2026-07-12
 
 ### Fixed
