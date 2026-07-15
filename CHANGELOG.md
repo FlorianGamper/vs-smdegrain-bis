@@ -4,6 +4,33 @@ Notable changes to `smdegrain_bis`. Format follows
 [Keep a Changelog](https://keepachangelog.com/); the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] — 2026-07-15
+
+### Fixed
+- **`search=6` / `search=7` (horizontal / vertical exhaustive) are now accepted.** The mvtools→mvu
+  search-id map only covered modes 2–5, so `search=6/7` raised `has no mvutensils equivalent` even
+  though mvu supports them — a regression against both the frozen mvtools baseline and Dogway's
+  reference (whose `int "search"` is a pass-through; `SMDegrain.html:397-404`). The −2 offset holds
+  across 2–7 (`6→4, 7→5`); only mvtools' `0`/`1` (OneTimeSearch/NStepSearch), which mvu dropped,
+  still raise. Regression-guarded by `tests/map_search.py`.
+
+### Changed
+- **Forward-ported Dogway 4.7.0d's motion-search tuning** — `searchparam`, `pelsearch`, `pglobal`,
+  and the `Recalculate` `searchparamr`, each wired to the avsi's default formula
+  (`SMDegrain.avsi:228/231/232/233`). These were absent from the v3.1.2d lineage, so bis's motion
+  search now follows Dogway's adaptive search radius and global-motion bias instead of the mvtools
+  defaults. Output is **byte-identical wherever these coincide with the old baseline** — which is the
+  whole tested grid: `pglobal` is discarded by mvu whenever global motion is off
+  (`MotionBlockPyramid.cpp:1588`, and `MVglobal` defaults to `truemotion`, `False` on large clips),
+  and `searchparam`/`pelsearch` resolve to the mvtools defaults except at full-res UHD
+  (`searchparam=1`) or refine+truemotion (`searchparam=5`). The change bites on `truemotion=True` /
+  full-res-UHD content with real global motion, which the test fixtures don't exercise — validate
+  there with a real-content A/B against Dogway's avsi.
+  - `pelsearch` is floored at `1` (Dogway allows `0`): mvu rejects `pelsearch=0` ("must be
+    positive"), a 1-unit divergence that only occurs at `searchparam=1`.
+  - `plevel` is deliberately **not** changed (Dogway forces `0`); bis keeps its truemotion-preset
+    value pending a `truemotion` calibration re-sweep.
+
 ## [0.1.3] — 2026-07-13
 
 ### Documentation

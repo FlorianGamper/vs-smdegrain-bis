@@ -12,7 +12,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "vapoursynth-mvuscale"
-version = "0.1.3"
+version = "0.2.0"
 description = "Native VapourSynth (API4) filter that scales mvutensils motion vectors for smdegrain_bis UHDhalf"
 readme = "README.md"
 requires-python = ">=3.8"

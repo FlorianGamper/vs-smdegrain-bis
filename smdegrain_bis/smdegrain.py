@@ -602,11 +602,44 @@ def SMDegrain(input, tr=2, thSAD=300, thSADC=None, RefineMotion=False, contrasha
     # bundle (§3 — lsad/plevel/globalmv/pglobal/pzero do not exist on it).
     _tm = _truemotion_analyse(truemotion, MVglobal)
     _mvu_search = _map_search(search)
+    # dct: mvtools takes a MODE (0 SAD, 1-4 DCT-domain variants, 5 SATD, 6-10
+    # mixed SATD/SAD); mvu has only a satd BOOL. So this mapping is lossy for
+    # everything except 0 and 5: dct=1..4 asks for a DCT-domain metric and gets
+    # SATD instead, silently. Not a live problem — the filter defaults to dct=0
+    # and neither Dogway's reference nor any caller here passes anything else —
+    # but if a caller ever needs true DCT, mvu cannot provide it and this line
+    # must become a hard error, not a coercion.
     _satd = int(dct != 0)
+
+    # ── Dogway 4.7.0d motion-search tuning (forward-port) ──────────────────────
+    # NOT in the v3.1.2d lineage — smdegrain_old passes none of these, so they
+    # intentionally diverge bis from the frozen mvtools baseline TOWARD Dogway's
+    # reference. Each is wired to the avsi's default formula; all four are
+    # accepted by mvu's live Analyse/Recalculate signatures. `plevel` is
+    # deliberately excluded: Dogway forces plevel=0 always (avsi:367), but bis's
+    # truemotion=True path sets plevel=1 to match mvtools' preset, and moving it
+    # perturbs the §14.4 truemotion calibration — its own re-sweep, separate step.
+    #   isUHD (avsi:143) = UHD-class source AND NOT UHDhalf (genuine full-res UHD).
+    _is_uhd = _uhd_eligible and not _do_uhdhalf
+    # searchparam (avsi:231): RefineMotion&&truemotion ? isUHD?2:5 : isUHD?1:2
+    if RefineMotion and truemotion:
+        _searchparam = 2 if _is_uhd else 5
+    else:
+        _searchparam = 1 if _is_uhd else 2
+    # pelsearch (avsi:233): Dogway floors at 0, but mvu rejects 0 ("pelsearch
+    # must be positive") where mvtools accepted it — so the mvu floor is 1. Only
+    # bites at searchparam=1 (genuine full-res UHD); a 1-unit mvu-imposed offset.
+    _pelsearch = max(1, _searchparam * 2 - 2)
+    # searchparamr (avsi:232): Recalculate's own (smaller) search radius. cround
+    # matches the avsi Round (half-away-from-zero); the max() clamps the negatives.
+    _searchparamr = max(0, cround(math.exp(0.69 * _searchparam - 1.79) - 0.67))
+
     analyse_params = dict(blksize=_bs, overlap=_ov, search=_mvu_search,
+                          searchparam=_searchparam, pelsearch=_pelsearch,
                           chroma=int(chroma), satd=_satd, **_tm)
+    analyse_params['pglobal'] = 11     # avsi:228 — unconditional; overrides _tm's 0
     refine_params = (dict(thsad=thSADR, blksize=[blk2, blk2], overlap=[ovl2, ovl2],
-                          search=_mvu_search, searchparam=2, chroma=int(chroma),
+                          search=_mvu_search, searchparam=_searchparamr, chroma=int(chroma),
                           satd=_satd, mvlambda=_tm['mvlambda'], pnew=_tm['pnew'])
                      if RefineMotion else None)
 
@@ -1071,9 +1104,12 @@ def KNLMeansCL(
 
 # mvtools search id → mvu search id. mvu enum (Analyse.cpp:210): 0 logarithmic/
 # diamond, 1 exhaustive, 2 hexagon (Hex2), 3 UMH, 4 horizontal, 5 vertical.
-# mvtools: 2 diamond, 3 exhaustive, 4 hexagon, 5 UMH — offset by 2 in that range.
-# Filter default search=4 (hexagon) → 2.
-_MVU_SEARCH_MAP = {2: 0, 3: 1, 4: 2, 5: 3}
+# mvtools enum: 0 OneTimeSearch, 1 NStepSearch, 2 diamond, 3 exhaustive,
+# 4 hexagon, 5 UMH, 6 horizontal exhaustive, 7 vertical exhaustive — a uniform
+# -2 offset for 2..7 (verified against Dogway's SMDegrain.html:397-404, whose
+# `int "search"` is a pass-through). Only mvtools 0/1 (OneTimeSearch/NStepSearch)
+# were dropped by mvu and have no equivalent. Filter default search=4 → 2.
+_MVU_SEARCH_MAP = {2: 0, 3: 1, 4: 2, 5: 3, 6: 4, 7: 5}
 
 
 def _map_search(mvtools_search):
@@ -1082,7 +1118,9 @@ def _map_search(mvtools_search):
     except KeyError:
         raise vs.Error(
             f"smdegrain_bis: search={mvtools_search} has no mvutensils equivalent "
-            f"(supported {sorted(_MVU_SEARCH_MAP)} = diamond/exhaustive/hexagon/UMH)."
+            f"(mvu dropped mvtools' OneTimeSearch/NStepSearch; supported "
+            f"{sorted(_MVU_SEARCH_MAP)} = diamond/exhaustive/hexagon/UMH/"
+            f"horizontal/vertical)."
         )
 
 
