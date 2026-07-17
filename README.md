@@ -4,7 +4,8 @@
 A pure temporal denoiser in the lineage of Dogway's Avisynth `SMDegrain` — it estimates motion
 between frames and averages each pixel along its motion trajectory, so grain and noise wash out
 while detail and edges stay put. Runs on [mvutensils](https://github.com/myrsloik/mvutensils)
-(`core.mvu`).
+(`core.mvu`) — **~1.4× faster than the mvtools implementation it was ported from** (measured 1.43× at
+matched settings, 1.46× on the UHDhalf path).
 
 ![Licence: GPL-3.0-or-later](https://img.shields.io/badge/licence-GPL--3.0--or--later-blue)
 ![VapourSynth: API4](https://img.shields.io/badge/VapourSynth-API4%20(R55%2B)-5b8fb9)
@@ -20,6 +21,10 @@ while detail and edges stay put. Runs on [mvutensils](https://github.com/myrsloi
 
 - **Motion-compensated temporal denoise** — `Super → Analyse → (Recalculate) → Degrain` on `core.mvu`,
   one generic `Degrain` over the whole `[bw₁,fw₁,…]` vector list.
+- **Multi-pass motion refinement** — `RefineMotion=N` chains N `Recalculate` passes, each halving the
+  block size (e.g. refine a coarse `blksize=32` search down to 8) to recover detail that large blocks
+  would otherwise blur. `N=1` reproduces Dogway's single refine pass; **`N≥2` is a `smdegrain_bis`
+  enhancement not present in the original `SMDegrain.avsi`** (which refines only once).
 - **Frame-prop aware** — auto-detects TV/PC range (`_ColorRange`/`_Range`, R74+ safe), interlacing
   (`_FieldBased`) and HDR transfer, and derives chroma-SAD / scene-change thresholds from `thSAD`.
 - **UHD-aware** — optional half-resolution motion search (`UHDhalf`) on 4K+ sources, with a native
@@ -52,6 +57,12 @@ smdegrain-bis[extras]`; they are imported lazily and not required.
 > [below](#building-the-native-scaler)) and drop it into your VapourSynth plugins directory — it then
 > autoloads and `smdegrain-bis` uses it without the `[uhdhalf]` extra.
 
+**No pip? (StaxRip and other hosts that bundle their own VapourSynth).** Use a portable drop-in zip —
+the pure-Python package plus the `mvuscale` plugin for your platform — and copy the two folders into
+the host's VapourSynth Python path and plugins directory. See [`packaging/`](packaging/README.md) to
+build one (`packaging/make_portable_zip.sh`). `vapoursynth-mvutensils` v4+ is a prerequisite either way
+(it is not bundled).
+
 ---
 
 ## Quick start
@@ -64,7 +75,8 @@ core = vs.core
 clip = ...                                  # YUV/GRAY, 8–16-bit integer (float is rejected)
 
 den = SMDegrain(clip, tr=2, thSAD=300)                      # basic temporal denoise
-den = SMDegrain(clip, tr=3, thSAD=400, RefineMotion=True)   # stronger, refined motion
+den = SMDegrain(clip, tr=3, thSAD=400, RefineMotion=True)   # stronger, refined motion (1 pass)
+den = SMDegrain(clip, blksize=32, RefineMotion=2)           # refine coarse blocks 32→16→8 (detail)
 den = SMDegrain(clip, tr=2, UHDhalf=True)                   # 4K: half-res motion search
 ```
 
@@ -84,13 +96,13 @@ clip`. Crop/pad to mod-4 upstream, or set `UHDhalf=False` for such sources.
 | `tr` | `2` | temporal radius — frames each side used for the average |
 | `thSAD` | `300` | degrain strength (luma SAD threshold); higher = stronger |
 | `thSADC` | auto | chroma SAD threshold (derived from `thSAD` via the v4.x `scaleCSAD` table) |
-| `RefineMotion` | `False` | run a `Recalculate` refinement pass over the vectors |
+| `RefineMotion` | `False` | motion-vector refinement. `False`/`0` = off; `True`/`1` = one `Recalculate` pass at half the block size (Dogway's behaviour); `N` = chain N passes, each halving the block size again (e.g. `blksize=32`, `RefineMotion=2` → 32→16→8), down to the 4×4 floor. `N≥2` is a `smdegrain_bis` enhancement — the original avsi refines once |
 | `pel` | auto | motion precision (½/¼-pel); auto = `1` on UHD, `2` otherwise |
 | `prefilter` | `-1` | motion-search prefilter (`-1` MinBlur … `5` BM3D, or a clip) |
 | `contrasharp` | auto | contra-sharpen the result toward the source |
 | `UHDhalf` | `True` | half-resolution motion search on >2599×1499 sources (dimensions must be mod-4) |
-| `LFR` | `False` | low-frequency detail restore, gated by a `SADMask` — ⚠️ **unsafe on mvutensils v2, [see below](#low-frequency-restore--de-flicker-lfr--dctflicker)** |
-| `DCTFlicker` | `False` | recursive flicker-calming pass (requires `LFR`, so the same warning applies) |
+| `LFR` | `False` | low-frequency detail restore, gated by a `SADMask` — **needs mvutensils v4+, [see below](#low-frequency-restore--de-flicker-lfr--dctflicker)** |
+| `DCTFlicker` | `False` | recursive flicker-calming pass (requires `LFR`; same v4+ requirement) |
 | `interlaced` | auto | auto-detected from `_FieldBased`; set `False` to force progressive |
 | `tv_range` | auto | auto-detected from the range frame-prop |
 | `tonemap_fn` | `None` | caller-supplied HDR tonemapper (search only) |
@@ -144,20 +156,19 @@ den = SMDegrain(clip, prefilter=my_pref)
 
 ### Low-frequency restore & de-flicker (`LFR` / `DCTFlicker`)
 
-> [!WARNING]
-> **Do not use `LFR` (or `DCTFlicker`) with mvutensils v2 — it can corrupt the heap.**
-> `LFR` gates its restore with a motion-confidence mask built by `mvu.SADMask`, and that filter has a
-> **data race** in mvutensils v2:
-> [myrsloik/mvutensils#5](https://github.com/myrsloik/mvutensils/issues/5) (open). `SADMask`,
-> `VectorLengthMask` and `OcclusionMask` all register as `fmParallel` but share one filter-instance
-> zimg scratch buffer, so parallel frame requests scribble over each other. A multi-threaded render of
-> real content dies with `double free or corruption`, a segfault, or `std::system_error` at
-> nondeterministic frames.
+> [!IMPORTANT]
+> **`LFR` / `DCTFlicker` need mvutensils v4 or newer.** They gate the low-frequency restore with a
+> motion-confidence mask from `mvu.SADMask`, which had a **data race** in mvutensils **before v4**:
+> [myrsloik/mvutensils#5](https://github.com/myrsloik/mvutensils/issues/5) (fixed in **v4**). On the
+> affected versions `SADMask`, `VectorLengthMask` and `OcclusionMask` all register as `fmParallel` but
+> share one filter-instance zimg scratch buffer, so parallel frame requests scribble over each other —
+> a multi-threaded render of real content dies with `double free or corruption`, a segfault, or
+> `std::system_error` at nondeterministic frames. It is **clean single-threaded**, so there it hides
+> from `core.num_threads = 1` runs and from `vspipe --info`, surfacing only in a real encode.
 >
-> It is **clean single-threaded** — so it is invisible to `core.num_threads = 1` runs and to
-> `vspipe --info`, and only shows up in a real encode. Leave `LFR=False` (the default) until the issue
-> is fixed upstream. Everything else in this filter is unaffected: `SADMask` is the only one of the
-> three the pipeline touches, and only when `LFR` is on.
+> **On v4+ the race is fixed and `LFR` is safe.** The package requires `vapoursynth-mvutensils>=4`, so
+> a normal `pip install` is already safe — this only bites if you force an older mvutensils below that
+> floor, in which case upgrade it or keep `LFR=False` (the default).
 
 Back-ported v4.x finishing for high-`tr` / high-`thSAD` (or `truemotion`) runs, where strong temporal
 averaging can eat low-frequency detail:
@@ -188,8 +199,8 @@ A single `SMDegrain()` call runs this pipeline (motion stages on `core.mvu`):
 3. **DitherLumaRebuild** — TV→PC luma expansion so motion estimation sees more code values.
 4. **UHDhalf** (UHD only) — soft-cubic downscale to half-res for the *search*; render super stays full.
 5. **Super** — `mvu.Super` builds the hierarchical pyramid.
-6. **Analyse → Recalculate** — `mvu.AnalyseMany(radius=tr)` yields `[bw₁,fw₁,…]`; `RefineMotion` runs
-   one `mvu.Recalculate` over the list.
+6. **Analyse → Recalculate** — `mvu.AnalyseMany(radius=tr)` yields `[bw₁,fw₁,…]`; `RefineMotion=N`
+   chains N `mvu.Recalculate` passes over the list, each halving the block size (N=1 is Dogway's single pass).
 7. **UHDhalf vector scale** — `mvuscale.ScaleVect` multiplies the half-res vectors up to full-res.
 8. **Degrain** — one generic `mvu.Degrain(clip, super, vectors)` does the compensated temporal average.
 9. **LFR / DCTFlicker** (optional) — `mvu.SADMask`-gated low-frequency restore + flicker calming.
@@ -217,6 +228,7 @@ Avisynth source.
 
 </td><td>
 
+- **multi-pass `RefineMotion=N`** (chained Recalculate, 32→…→8; the avsi refines **once**)
 - frame-prop defaults (range/field/transfer)
 - caller-injected `tonemap_fn` (HDR, search-only)
 - public `prefilter_clip()` helper

@@ -4,6 +4,33 @@ Notable changes to `smdegrain_bis`. Format follows
 [Keep a Changelog](https://keepachangelog.com/); the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+## [0.3.0] — 2026-07-17
+
+### Added
+- **`RefineMotion` is now int-valued — multiple `Recalculate` passes.** `False`/`0` = off and
+  `True`/`1` = the single half-block refine pass Dogway's `SMDegrain.avsi` does (unchanged and
+  **byte-identical** to before — verified across the progressive/interlaced/GlobalR/GRAY/UHDhalf
+  paths); `RefineMotion=N` chains N `mvu.Recalculate` passes, each halving the block size again
+  (e.g. `blksize=32`, `RefineMotion=2` refines 32→16→8), down to mvu's 4×4 floor. `thSAD` is held
+  constant across passes — mvu rescales it by block area, so each finer pass refines more
+  aggressively. This extends **beyond** Dogway's reference (which is single-pass only), matching
+  vsjetpack `mc_degrain`'s `refine`. Requesting more passes than the block size allows raises a clear
+  error; existing bool calls are unaffected. Resolves feature request
+  [#1](https://github.com/FlorianGamper/vs-smdegrain-bis/issues/1).
+
+### Changed
+- **Dependency floor raised to `vapoursynth-mvutensils>=4`** (was `>=2`). The `LFR` mask
+  (`mvu.SADMask`) had a data race on mvutensils v2/v3
+  ([myrsloik/mvutensils#5](https://github.com/myrsloik/mvutensils/issues/5), fixed in **v4**), so a
+  fresh install is now safe for `LFR` by default instead of only when pip happened to resolve v4.
+
+### Documentation
+- **`LFR` / `DCTFlicker` are safe again — on mvutensils v4+.** The README warning is downgraded from
+  "unsafe on v2" to a v4+ requirement, now guaranteed by the dependency floor above. The upstream
+  race ([myrsloik/mvutensils#5](https://github.com/myrsloik/mvutensils/issues/5)) is fixed in v4.
+
 ## [0.2.0] — 2026-07-15
 
 ### Fixed

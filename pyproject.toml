@@ -29,8 +29,10 @@ classifiers = [
 ]
 # The motion backend. VapourSynth itself is assumed present (users bring their
 # own VS); vapoursynth-mvutensils pulls a compatible `vapoursynth` if pip-managed.
+# Floor is v4: the LFR mask (mvu.SADMask) races on v2/v3 (myrsloik/mvutensils#5,
+# fixed in v4), so LFR is only safe from v4 up. See README → LFR / DCTFlicker.
 dependencies = [
-    "vapoursynth-mvutensils>=2",
+    "vapoursynth-mvutensils>=4",
 ]
 
 [project.optional-dependencies]

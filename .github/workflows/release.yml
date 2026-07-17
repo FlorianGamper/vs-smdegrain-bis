@@ -64,6 +64,60 @@ jobs:
           name: dist-smdegrain-bis
           path: dist/*
 
+  portable-zips:
+    # Turn the per-platform mvuscale wheels into "drop-in" zips for non-pip hosts
+    # (StaxRip et al.): pure-Python package + the platform's mvuscale plugin binary +
+    # licences + INSTALL.txt. mvutensils is NOT bundled (it is a prerequisite). On a
+    # tag, the zips are attached to the GitHub Release.
+    name: portable drop-in zips
+    needs: [mvuscale-wheels]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # create/attach the GitHub Release on a tag push
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: dist-mvuscale-*
+          path: wheels
+          merge-multiple: true
+      - name: Assemble per-platform drop-in zips from the mvuscale wheels
+        run: |
+          set -euo pipefail
+          mkdir -p zips
+          shopt -s nullglob
+          made=0
+          for whl in wheels/*.whl; do
+            case "$whl" in
+              *manylinux*x86_64*|*linux_x86_64*)   OS=linux   ARCH=x64   ;;
+              *manylinux*aarch64*|*linux_aarch64*) OS=linux   ARCH=arm64 ;;
+              *macosx*x86_64*)                     OS=macos   ARCH=x64   ;;
+              *macosx*arm64*)                      OS=macos   ARCH=arm64 ;;
+              *win_amd64*)                         OS=windows ARCH=x64   ;;
+              *) echo "::warning::skipping unrecognised wheel $whl"; continue ;;
+            esac
+            tmp="$(mktemp -d)"
+            python3 -m zipfile -e "$whl" "$tmp"
+            bin="$(find "$tmp/vapoursynth/plugins/mvuscale" -type f | head -1)"
+            [ -n "$bin" ] || { echo "::error::no mvuscale binary in $whl"; exit 1; }
+            MVUSCALE_BIN="$bin" OS="$OS" ARCH="$ARCH" OUT="$PWD/zips" bash packaging/make_portable_zip.sh
+            made=$((made+1))
+          done
+          [ "$made" -gt 0 ] || { echo "::error::no wheels processed into zips"; exit 1; }
+          ls -l zips
+      - uses: actions/upload-artifact@v6
+        with:
+          name: portable-zips
+          path: zips/*.zip
+      - name: Attach zips to the GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" zips/*.zip --clobber
+
   publish-mvuscale:
     needs: [mvuscale-wheels, mvuscale-sdist]
     runs-on: ubuntu-latest

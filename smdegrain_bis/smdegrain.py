@@ -282,7 +282,7 @@ def _ensure_mvuscale(core):
                 return
 
 
-def SMDegrain(input, tr=2, thSAD=300, thSADC=None, RefineMotion=False, contrasharp=None, CClip=None, interlaced=None, tff=None, plane=4, Globals=0, pel=None, subpixel=2, prefilter=-1, mfilter=None,
+def SMDegrain(input, tr=2, thSAD=300, thSADC=None, RefineMotion: int = False, contrasharp=None, CClip=None, interlaced=None, tff=None, plane=4, Globals=0, pel=None, subpixel=2, prefilter=-1, mfilter=None,
               blksize=None, overlap=None, search=4, truemotion=None, MVglobal=None, dct=0, limit=255, limitc=None, thSCD1=None, thSCD2=130, chroma=True, hpad=None, vpad=None, Str=1.0, Amp=0.0625, opencl=False, device=None,
               tonemap_fn=None, tv_range=None, UHDhalf=True, LFR=False, DCTFlicker=False):
     if not isinstance(input, vs.VideoNode):
@@ -452,7 +452,6 @@ def SMDegrain(input, tr=2, thSAD=300, thSADC=None, RefineMotion=False, contrasha
     blk2 = blksize // 2
     if overlap is None:
         overlap = blk2
-    ovl2 = overlap // 2
     if truemotion is None:
         truemotion = not is_large
     if MVglobal is None:
@@ -485,8 +484,22 @@ def SMDegrain(input, tr=2, thSAD=300, thSADC=None, RefineMotion=False, contrasha
         raise vs.Error("smdegrain_bis: 'prefilter' must be the same format as input")
     if mfilter is not None and (not isinstance(mfilter, vs.VideoNode) or mfilter.format.id != input.format.id):
         raise vs.Error("smdegrain_bis: 'mfilter' must be the same format as input")
-    if RefineMotion and blksize < 8:
-        raise vs.Error('SMDegrain: For RefineMotion you need a blksize of at least 8')
+    if not (isinstance(RefineMotion, int) and RefineMotion >= 0):
+        raise vs.Error(
+            "smdegrain_bis: 'RefineMotion' must be a bool or a non-negative int "
+            "(0/False = no refinement, 1/True = one Recalculate pass, N = N passes "
+            "each halving the block size)")
+    n_refine = int(RefineMotion)   # False->0, True->1, N->N chained Recalculate passes
+    if n_refine and (blksize >> n_refine) < 4:
+        max_passes = 0
+        _b = blksize
+        while (_b >> 1) >= 4:
+            _b >>= 1
+            max_passes += 1
+        raise vs.Error(
+            f'SMDegrain: RefineMotion={n_refine} halves the block size once per pass down '
+            f'to a 4x4 floor, but blksize={blksize} allows at most {max_passes} pass(es). '
+            f'Use RefineMotion<={max_passes} or a larger blksize.')
     # not sure whether this is still true, so I disabled it
     #if not chroma and plane != 0:
     #    raise vs.Error('SMDegrain: Denoising chroma with luma only vectors is bugged in mvtools and thus unsupported')
@@ -638,10 +651,28 @@ def SMDegrain(input, tr=2, thSAD=300, thSADC=None, RefineMotion=False, contrasha
                           searchparam=_searchparam, pelsearch=_pelsearch,
                           chroma=int(chroma), satd=_satd, **_tm)
     analyse_params['pglobal'] = 11     # avsi:228 — unconditional; overrides _tm's 0
-    refine_params = (dict(thsad=thSADR, blksize=[blk2, blk2], overlap=[ovl2, ovl2],
-                          search=_mvu_search, searchparam=_searchparamr, chroma=int(chroma),
-                          satd=_satd, mvlambda=_tm['mvlambda'], pnew=_tm['pnew'])
-                     if RefineMotion else None)
+    # RefineMotion=N chains N Recalculate passes, each halving the block size (and
+    # overlap) below the base Analyse geometry: pass i uses blksize>>(i+1), down to the
+    # mvu 4x4 floor (validated by the guard above). thsad is held CONSTANT across passes
+    # — mvu rescales it by block area internally, so each finer pass automatically
+    # refines more aggressively (this matches vsjetpack mc_degrain's `refine`). N=1
+    # reproduces Dogway avsi:388 exactly (bs=blk2, overlap=overlap//2). Overlap is
+    # clamped to <= blksize/2 and rounded to the chroma subsampling grid, since mvu
+    # rejects a non-divisible overlap when chroma is searched.
+    refine_params = None
+    if n_refine:
+        _ov_align = (1 << max(pref_search.format.subsampling_w,
+                              pref_search.format.subsampling_h)) if chroma else 1
+        _refine_static = dict(search=_mvu_search, searchparam=_searchparamr,
+                              chroma=int(chroma), satd=_satd,
+                              mvlambda=_tm['mvlambda'], pnew=_tm['pnew'])
+        refine_params = []
+        for _i in range(n_refine):
+            _bs_i = blksize >> (_i + 1)
+            _ov_i = min(overlap >> (_i + 1), _bs_i // 2)
+            _ov_i -= _ov_i % _ov_align
+            refine_params.append(dict(thsad=thSADR, blksize=[_bs_i, _bs_i],
+                                      overlap=[_ov_i, _ov_i], **_refine_static))
 
     refine_super = None
     if RefineMotion:
@@ -1180,8 +1211,9 @@ def get_motion_vectors(super_search, refine, analyse_params, recalc_params,
 
     super_search:  mvu super at search resolution (full pyramid).
     refine:        mvu super for Recalculate (single-level), or None.
-    analyse_params/recalc_params: mvu Analyse / Recalculate kwarg dicts
-                   (no `delta`/`radius` — those are supplied here).
+    analyse_params: mvu Analyse kwarg dict (no `delta`/`radius` — supplied here).
+    recalc_params: list of per-pass Recalculate kwarg dicts (one per RefineMotion
+                   pass, coarsest→finest block size), or None for no refinement.
     tr:            temporal radius. Interlaced caps the delta set at 2,4,6,
                    matching the original ladder (never past Degrain3 interlaced).
     vector_scale:  UHDhalf scale factor (2) applied to every vector, or None.
@@ -1203,9 +1235,13 @@ def get_motion_vectors(super_search, refine, analyse_params, recalc_params,
         # AnalyseMany(radius=tr) already returns [bw1, fw1, bw2, fw2, …].
         vecs = list(core.mvu.AnalyseMany(super_search, radius=tr, **analyse_params))
 
-    if recalc_params is not None:
-        # Recalculate takes AND returns the whole vector list in one call.
-        vecs = list(core.mvu.Recalculate(refine, vecs, **recalc_params))
+    if recalc_params:
+        # RefineMotion=N: N chained Recalculate passes, each re-searching the whole
+        # vector list at a smaller block size with the previous pass's vectors as
+        # predictors. Recalculate takes AND returns the whole list, so passes chain
+        # on the same (coarsest-built) refine super. N=1 is the single Dogway pass.
+        for _p in recalc_params:
+            vecs = list(core.mvu.Recalculate(refine, vecs, **_p))
 
     if vector_scale is not None:
         vecs = [scale_vect(v, vector_scale) for v in vecs]
