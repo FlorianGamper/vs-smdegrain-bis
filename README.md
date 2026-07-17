@@ -4,8 +4,9 @@
 A pure temporal denoiser in the lineage of Dogway's Avisynth `SMDegrain` — it estimates motion
 between frames and averages each pixel along its motion trajectory, so grain and noise wash out
 while detail and edges stay put. Runs on [mvutensils](https://github.com/myrsloik/mvutensils)
-(`core.mvu`) — **~1.4× faster than the mvtools implementation it was ported from** (measured 1.43× at
-matched settings, 1.46× on the UHDhalf path).
+(`core.mvu`), which makes it **~1.4× faster than the mvtools implementation it was ported from**
+(measured 1.43–1.46× vs the same mvtools settings). On 4K, the optional `UHDhalf` half-res motion
+search is a further, separate speedup on top of that.
 
 ![Licence: GPL-3.0-or-later](https://img.shields.io/badge/licence-GPL--3.0--or--later-blue)
 ![VapourSynth: API4](https://img.shields.io/badge/VapourSynth-API4%20(R55%2B)-5b8fb9)
@@ -96,7 +97,7 @@ clip`. Crop/pad to mod-4 upstream, or set `UHDhalf=False` for such sources.
 | `tr` | `2` | temporal radius — frames each side used for the average |
 | `thSAD` | `300` | degrain strength (luma SAD threshold); higher = stronger |
 | `thSADC` | auto | chroma SAD threshold (derived from `thSAD` via the v4.x `scaleCSAD` table) |
-| `RefineMotion` | `False` | motion-vector refinement. `False`/`0` = off; `True`/`1` = one `Recalculate` pass at half the block size (Dogway's behaviour); `N` = chain N passes, each halving the block size again (e.g. `blksize=32`, `RefineMotion=2` → 32→16→8), down to the 4×4 floor. `N≥2` is a `smdegrain_bis` enhancement — the original avsi refines once |
+| `RefineMotion` | `False` | motion-vector refinement. `False`/`0` = off; `True`/`1` = one `Recalculate` pass at half the block size (Dogway's behaviour); `N` = chain N passes, each halving the block size again (e.g. `blksize=32`, `RefineMotion=2` → 32→16→8), down to the 4×4 floor. Asking for more passes than the block size allows is **clamped** (with a warning) to the deepest that fits, so one setting works across clip sizes. `N≥2` is a `smdegrain_bis` enhancement — the original avsi refines once |
 | `pel` | auto | motion precision (½/¼-pel); auto = `1` on UHD, `2` otherwise |
 | `prefilter` | `-1` | motion-search prefilter (`-1` MinBlur … `5` BM3D, or a clip) |
 | `contrasharp` | auto | contra-sharpen the result toward the source |

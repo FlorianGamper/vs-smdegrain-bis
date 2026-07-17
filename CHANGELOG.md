@@ -6,6 +6,15 @@ Notable changes to `smdegrain_bis`. Format follows
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-07-17
+
+### Changed
+- **Over-deep `RefineMotion` now clamps instead of erroring.** Requesting more refine passes than the
+  block size allows (each pass halves it down to mvu's 4×4 floor) now clamps to the deepest that fits
+  and emits a warning, rather than raising `vs.Error` — so a single `RefineMotion` setting works across
+  a range of clip sizes (e.g. a batch/multi-encode tool feeding smaller clips through one script). Bad
+  types (negative or non-int) still raise.
+
 ## [0.3.0] — 2026-07-17
 
 ### Added

@@ -489,17 +489,22 @@ def SMDegrain(input, tr=2, thSAD=300, thSADC=None, RefineMotion: int = False, co
             "smdegrain_bis: 'RefineMotion' must be a bool or a non-negative int "
             "(0/False = no refinement, 1/True = one Recalculate pass, N = N passes "
             "each halving the block size)")
+    # Clamp the refine depth to what the block size allows (each pass halves blksize down
+    # to mvu's 4x4 floor) rather than erroring, so ONE RefineMotion setting works across a
+    # range of clip sizes — e.g. a batch/multi-encode tool that feeds smaller clips through
+    # the same script. max_passes = how many times blksize can be halved and stay >= 4.
     n_refine = int(RefineMotion)   # False->0, True->1, N->N chained Recalculate passes
-    if n_refine and (blksize >> n_refine) < 4:
-        max_passes = 0
-        _b = blksize
-        while (_b >> 1) >= 4:
-            _b >>= 1
-            max_passes += 1
-        raise vs.Error(
-            f'SMDegrain: RefineMotion={n_refine} halves the block size once per pass down '
-            f'to a 4x4 floor, but blksize={blksize} allows at most {max_passes} pass(es). '
-            f'Use RefineMotion<={max_passes} or a larger blksize.')
+    max_passes = 0
+    _b = blksize
+    while (_b >> 1) >= 4:
+        _b >>= 1
+        max_passes += 1
+    if n_refine > max_passes:
+        warnings.warn(
+            f"smdegrain_bis: RefineMotion={n_refine} exceeds what blksize={blksize} allows "
+            f"(each pass halves the block size down to mvu's 4x4 floor); clamping to "
+            f"{max_passes} pass(es).", stacklevel=2)
+        n_refine = max_passes
     # not sure whether this is still true, so I disabled it
     #if not chroma and plane != 0:
     #    raise vs.Error('SMDegrain: Denoising chroma with luma only vectors is bugged in mvtools and thus unsupported')
@@ -600,7 +605,7 @@ def SMDegrain(input, tr=2, thSAD=300, thSADC=None, RefineMotion: int = False, co
     if not GlobalR:
         super_render = inputP.mvu.Super(blksize=_render_bs, overlap=_render_ov, pad=_render_pad,
                                         pel=pel, sharp=subpixel, onelevel=_render_onelevel)
-        if RefineMotion:
+        if n_refine:
             Recalculate = pref_search.mvu.Super(blksize=_bs, overlap=_ov, pad=_search_pad,
                                                 pel=pel, sharp=subpixel, onelevel=True)
 
@@ -635,7 +640,7 @@ def SMDegrain(input, tr=2, thSAD=300, thSADC=None, RefineMotion: int = False, co
     #   isUHD (avsi:143) = UHD-class source AND NOT UHDhalf (genuine full-res UHD).
     _is_uhd = _uhd_eligible and not _do_uhdhalf
     # searchparam (avsi:231): RefineMotion&&truemotion ? isUHD?2:5 : isUHD?1:2
-    if RefineMotion and truemotion:
+    if n_refine and truemotion:
         _searchparam = 2 if _is_uhd else 5
     else:
         _searchparam = 1 if _is_uhd else 2
@@ -675,7 +680,7 @@ def SMDegrain(input, tr=2, thSAD=300, thSADC=None, RefineMotion: int = False, co
                                       overlap=[_ov_i, _ov_i], **_refine_static))
 
     refine_super = None
-    if RefineMotion:
+    if n_refine:
         refine_super = Recalculate if not GlobalR else super_render
     vector_scale = 2 if _do_uhdhalf else None
     vectors = get_motion_vectors(super_search, refine_super, analyse_params,

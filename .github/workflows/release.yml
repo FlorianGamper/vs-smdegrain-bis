@@ -94,6 +94,7 @@ jobs:
               *macosx*x86_64*)                     OS=macos   ARCH=x64   ;;
               *macosx*arm64*)                      OS=macos   ARCH=arm64 ;;
               *win_amd64*)                         OS=windows ARCH=x64   ;;
+              *musllinux*|*win32*|*_i686*)         echo "note: no drop-in zip for non-desktop wheel $whl"; continue ;;
               *) echo "::warning::skipping unrecognised wheel $whl"; continue ;;
             esac
             tmp="$(mktemp -d)"
