@@ -61,7 +61,7 @@ smdegrain-bis[extras]`; they are imported lazily and not required.
 **No pip? (StaxRip and other hosts that bundle their own VapourSynth).** Use a portable drop-in zip —
 the pure-Python package plus the `mvuscale` plugin for your platform — and copy the two folders into
 the host's VapourSynth Python path and plugins directory. See [`packaging/`](packaging/README.md) to
-build one (`packaging/make_portable_zip.sh`). `vapoursynth-mvutensils` v4+ is a prerequisite either way
+build one (`packaging/make_portable_zip.sh`). `vapoursynth-mvutensils` v9+ is a prerequisite either way
 (it is not bundled).
 
 ---
@@ -102,8 +102,8 @@ clip`. Crop/pad to mod-4 upstream, or set `UHDhalf=False` for such sources.
 | `prefilter` | `-1` | motion-search prefilter (`-1` MinBlur … `5` BM3D, or a clip) |
 | `contrasharp` | auto | contra-sharpen the result toward the source |
 | `UHDhalf` | `True` | half-resolution motion search on >2599×1499 sources (dimensions must be mod-4) |
-| `LFR` | `False` | low-frequency detail restore, gated by a `SADMask` — **needs mvutensils v4+, [see below](#low-frequency-restore--de-flicker-lfr--dctflicker)** |
-| `DCTFlicker` | `False` | recursive flicker-calming pass (requires `LFR`; same v4+ requirement) |
+| `LFR` | `False` | low-frequency detail restore, gated by a `SADMask` — **[see below](#low-frequency-restore--de-flicker-lfr--dctflicker)** |
+| `DCTFlicker` | `False` | recursive flicker-calming pass (requires `LFR`) |
 | `interlaced` | auto | auto-detected from `_FieldBased`; set `False` to force progressive |
 | `tv_range` | auto | auto-detected from the range frame-prop |
 | `tonemap_fn` | `None` | caller-supplied HDR tonemapper (search only) |
@@ -158,7 +158,7 @@ den = SMDegrain(clip, prefilter=my_pref)
 ### Low-frequency restore & de-flicker (`LFR` / `DCTFlicker`)
 
 > [!IMPORTANT]
-> **`LFR` / `DCTFlicker` need mvutensils v4 or newer.** They gate the low-frequency restore with a
+> **`LFR` / `DCTFlicker` depend on a `mvu.SADMask` fix that landed in mvutensils v4.** They gate the low-frequency restore with a
 > motion-confidence mask from `mvu.SADMask`, which had a **data race** in mvutensils **before v4**:
 > [myrsloik/mvutensils#5](https://github.com/myrsloik/mvutensils/issues/5) (fixed in **v4**). On the
 > affected versions `SADMask`, `VectorLengthMask` and `OcclusionMask` all register as `fmParallel` but
@@ -167,9 +167,10 @@ den = SMDegrain(clip, prefilter=my_pref)
 > `std::system_error` at nondeterministic frames. It is **clean single-threaded**, so there it hides
 > from `core.num_threads = 1` runs and from `vspipe --info`, surfacing only in a real encode.
 >
-> **On v4+ the race is fixed and `LFR` is safe.** The package requires `vapoursynth-mvutensils>=4`, so
-> a normal `pip install` is already safe — this only bites if you force an older mvutensils below that
-> floor, in which case upgrade it or keep `LFR=False` (the default).
+> **On v4+ the race is fixed and `LFR` is safe.** The package requires `vapoursynth-mvutensils>=9`
+> (raised from `>=4` for an unrelated `Recalculate` fix — see the changelog), so a normal
+> `pip install` is already well clear of this — it only bites if you force an older mvutensils below
+> that floor, in which case upgrade it or keep `LFR=False` (the default).
 
 Back-ported v4.x finishing for high-`tr` / high-`thSAD` (or `truemotion`) runs, where strong temporal
 averaging can eat low-frequency detail:

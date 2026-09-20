@@ -29,10 +29,21 @@ classifiers = [
 ]
 # The motion backend. VapourSynth itself is assumed present (users bring their
 # own VS); vapoursynth-mvutensils pulls a compatible `vapoursynth` if pip-managed.
-# Floor is v4: the LFR mask (mvu.SADMask) races on v2/v3 (myrsloik/mvutensils#5,
-# fixed in v4), so LFR is only safe from v4 up. See README → LFR / DCTFlicker.
+# Floor is v9. The behavioural requirement is v8; v9 is what this package is
+# tested against, and the floor is pinned to the tested version rather than to
+# the earliest one that would work.
+#   * v8 fixed Recalculate's thSAD scaling: it scaled by the INCOMING vectors'
+#     block size instead of the size Recalculate was about to use. A refine pass
+#     halves the block size in both dimensions, so on v4–v7 every refine pass ran
+#     with a thSAD exactly 4x too permissive. The per-pass progression was always
+#     correct; only the absolute threshold was off.
+#   * v5 (not v9) added Degrain7…Degrain25, lifting the ceiling that capped `tr`
+#     at 6 — a capability note, not a reason for this floor.
+# The previous v4 floor was the LFR mask race (mvu.SADMask,
+# myrsloik/mvutensils#5, fixed in v4) — still true, and subsumed.
+# See README → LFR / DCTFlicker.
 dependencies = [
-    "vapoursynth-mvutensils>=4",
+    "vapoursynth-mvutensils>=9",
 ]
 
 [project.optional-dependencies]

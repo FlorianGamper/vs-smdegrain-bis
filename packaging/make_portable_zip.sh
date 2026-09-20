@@ -66,7 +66,7 @@ cp smdegrain_bis/vendor/NOTICE "$pkg/NOTICE-vendor.txt"
   echo
   echo "REQUIREMENTS (install separately — NOT bundled here):"
   echo "  * VapourSynth (API4 / R55+)."
-  echo "  * vapoursynth-mvutensils >= 4   (the core.mvu backend). Get it via your"
+  echo "  * vapoursynth-mvutensils >= 9   (the core.mvu backend). Get it via your"
   echo "    host's plugin manager (vsrepo), 'pip install vapoursynth-mvutensils', or"
   echo "    its GitHub releases. LFR is only thread-safe on v4+."
   echo "  * Optional prefilters: vsrgtools, vs-dfttest2 (imported lazily; skip if unused)."

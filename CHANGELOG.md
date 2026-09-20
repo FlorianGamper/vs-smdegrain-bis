@@ -6,6 +6,53 @@ Notable changes to `smdegrain_bis`. Format follows
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-09-20
+
+### Changed
+- **Dependency floor raised to `vapoursynth-mvutensils>=9`** (was `>=4`), and this is a
+  **behavioural change for every `RefineMotion`-enabled call.** mvutensils **v8** fixed `Recalculate`'s
+  `thSAD` scaling — it scaled by the *incoming* vectors' block size instead of the size `Recalculate`
+  was about to use ([`0b1380b`](https://github.com/myrsloik/mvutensils/commit/0b1380b), *"Fix SAD
+  scaling in recalculate, it accidentally got scaled for the old block size isntead of the new one"*).
+  A `RefineMotion` pass halves the block size in both dimensions, quartering the block area, so on
+  v4–v7 **every** refine pass — single or chained — ran with a `thSAD` **exactly 4× too permissive**
+  and under-filtered its motion vectors. Note this is a calibration error, not a progression error:
+  the per-pass tightening documented in 0.3.0 (*"mvu rescales it by block area, so each finer pass
+  refines more aggressively"*) was always in effect, since each pass was 4× stricter than the last on
+  both v4–v7 and v8+ — the whole ladder simply sat 4× too high.
+
+  A/B'd on this host, same `smdegrain_bis` code, mvutensils v4 vs v9, `vspipe` md5 over 8 frames of a
+  YUV420P10 UHD source. **Output is byte-identical wherever `RefineMotion=0`, and differs wherever
+  `RefineMotion≥1`** — across the progressive, `UHDhalf` and `LFR` paths alike:
+
+  | case | `RefineMotion` | v4 vs v9 |
+  |---|---|---|
+  | `tr=2 pel=2` | 0 | identical |
+  | `tr=2 pel=2` | 1 | **differs** |
+  | `tr=3 pel=2` | 0 | identical |
+  | `tr=3 pel=2` | 1 | **differs** |
+  | `UHDhalf` | 0 | identical |
+  | `UHDhalf` | 1 | **differs** |
+  | `LFR` | 0 | identical |
+  | `LFR` | 1 | **differs** |
+
+  So the change is confined to `Recalculate`: `SADMask`/`LFR` and the `mvuscale` vector path are
+  themselves unaffected. Existing callers keep their `RefineMotion` setting but get a correctly
+  thresholded refine pass; expect denoise output to change.
+
+### Added
+- **`tr` is no longer capped at 6 on progressive sources.** mvutensils **v5** added
+  `Degrain7`…`Degrain25` (upstream raised the radius ceiling from 6 to 25 and lifted the vector-clip
+  limit to 50). `SMDegrain` calls `mvu.Degrain`, which deduces `DegrainN` from the vector count, so
+  higher radii need no code change here — they simply had no `DegrainN` to land on before. Verified
+  by rendering `tr=8` on v9. **Interlaced sources remain capped at `tr=3`** by this package's own
+  `2,4,6` delta ladder, independently of mvutensils, and that truncation is currently silent.
+
+### Documentation
+- README and `pyproject.toml` now state the v9 floor and why. The v4 LFR-race requirement
+  ([myrsloik/mvutensils#5](https://github.com/myrsloik/mvutensils/issues/5)) is unchanged and
+  subsumed by the higher floor.
+
 ## [0.3.1] — 2026-07-17
 
 ### Changed
