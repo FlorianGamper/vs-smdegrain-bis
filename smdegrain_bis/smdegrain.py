@@ -282,6 +282,16 @@ def _ensure_mvuscale(core):
                 return
 
 
+# Interlaced processing walks a FIXED ladder of even field deltas rather than
+# AnalyseMany's radius, so its temporal radius is capped by the length of this
+# list. This is the port's own limit (it mirrors the original avsi, which never
+# goes past Degrain3 interlaced) and is independent of what mvutensils supports
+# — raising the mvutensils floor does NOT raise it. Single source of truth for
+# both the clamp in SMDegrain and the ladder in get_motion_vectors.
+_INTERLACED_DELTAS = (2, 4, 6)
+_INTERLACED_MAX_TR = len(_INTERLACED_DELTAS)
+
+
 def SMDegrain(input, tr=2, thSAD=300, thSADC=None, RefineMotion: int = False, contrasharp=None, CClip=None, interlaced=None, tff=None, plane=4, Globals=0, pel=None, subpixel=2, prefilter=-1, mfilter=None,
               blksize=None, overlap=None, search=4, truemotion=None, MVglobal=None, dct=0, limit=255, limitc=None, thSCD1=None, thSCD2=130, chroma=True, hpad=None, vpad=None, Str=1.0, Amp=0.0625, opencl=False, device=None,
               tonemap_fn=None, tv_range=None, UHDhalf=True, LFR=False, DCTFlicker=False):
@@ -505,6 +515,23 @@ def SMDegrain(input, tr=2, thSAD=300, thSADC=None, RefineMotion: int = False, co
             f"(each pass halves the block size down to mvu's 4x4 floor); clamping to "
             f"{max_passes} pass(es).", stacklevel=2)
         n_refine = max_passes
+
+    # Same contract as the RefineMotion clamp above: asking for more than the
+    # configuration supports clamps and SAYS SO, rather than silently truncating.
+    # Interlaced uses a fixed 2,4,6 field-delta ladder (get_motion_vectors), so
+    # the temporal radius tops out at 3 there whatever mvutensils supports —
+    # this cap is the port's, not the plugin's, and it does not move with the
+    # mvutensils floor. Clamping here is behaviour-neutral: the ladder already
+    # truncated via [:min(tr, 3)], and tr's only other consumer is the
+    # DCTFlicker recursion, which is unreachable when interlaced (LFR and
+    # DCTFlicker are both force-disabled above).
+    if interlaced and tr > _INTERLACED_MAX_TR:
+        warnings.warn(
+            f"smdegrain_bis: tr={tr} exceeds what interlaced processing supports "
+            f"(the fixed {','.join(str(d) for d in _INTERLACED_DELTAS)} field-delta ladder caps the "
+            f"temporal radius at {_INTERLACED_MAX_TR}); clamping to {_INTERLACED_MAX_TR}.",
+            stacklevel=2)
+        tr = _INTERLACED_MAX_TR
     # not sure whether this is still true, so I disabled it
     #if not chroma and plane != 0:
     #    raise vs.Error('SMDegrain: Denoising chroma with luma only vectors is bugged in mvtools and thus unsupported')
@@ -1219,8 +1246,12 @@ def get_motion_vectors(super_search, refine, analyse_params, recalc_params,
     analyse_params: mvu Analyse kwarg dict (no `delta`/`radius` — supplied here).
     recalc_params: list of per-pass Recalculate kwarg dicts (one per RefineMotion
                    pass, coarsest→finest block size), or None for no refinement.
-    tr:            temporal radius. Interlaced caps the delta set at 2,4,6,
-                   matching the original ladder (never past Degrain3 interlaced).
+    tr:            temporal radius. Interlaced walks the fixed
+                   `_INTERLACED_DELTAS` ladder (2,4,6) instead of AnalyseMany's
+                   radius, so it never goes past Degrain3 — matching the
+                   original avsi. SMDegrain clamps `tr` to `_INTERLACED_MAX_TR`
+                   and warns before calling this, so the `[:min(...)]` below is
+                   a belt-and-braces guard for direct callers of this helper.
     vector_scale:  UHDhalf scale factor (2) applied to every vector, or None.
 
     mvu's `delta` SIGN carries direction: positive = backward (past), negative =
@@ -1230,7 +1261,7 @@ def get_motion_vectors(super_search, refine, analyse_params, recalc_params,
     of the port — getting it backwards denoises the wrong direction silently).
     """
     if interlaced:
-        deltas = [2, 4, 6][:min(tr, 3)]
+        deltas = _INTERLACED_DELTAS[:min(tr, _INTERLACED_MAX_TR)]
         vecs = []
         for d in deltas:
             bw = core.mvu.Analyse(super_search, delta=d,  **analyse_params)   # past

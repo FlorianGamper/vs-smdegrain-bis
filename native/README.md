@@ -27,7 +27,7 @@ its own plugin directory can instead relocate the wheel payload (or the
 ```bash
 pip wheel native/ -w dist/            # scikit-build-core + CMake
 # or, just the .so:
-CXX=g++ bash native/build.sh          # -> tests/_plugins/mvuscale/libmvuscale.so
+CXX=g++ bash native/build.sh          # -> native/libmvuscale.so (override with OUT=)
 ```
 
 The VapourSynth API4 headers are vendored under `native/include/` (see its

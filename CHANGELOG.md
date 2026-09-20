@@ -6,6 +6,38 @@ Notable changes to `smdegrain_bis`. Format follows
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-09-20
+
+### Changed
+- **Interlaced `tr` above 3 now clamps with a warning instead of truncating silently.** Interlaced
+  processing walks a fixed `2,4,6` field-delta ladder rather than `AnalyseMany`'s radius, so its
+  temporal radius has always topped out at 3 — but asking for more was simply sliced away with no
+  signal, while the analogous `RefineMotion` over-depth case has warned since 0.3.1. Same situation,
+  two opposite behaviours. `tr` now clamps and says so, matching the `RefineMotion` contract.
+
+  **No pixels change**: the ladder already truncated via `[:min(tr, …)]`, and `tr`'s only other
+  consumer is the `DCTFlicker` recursion, which is unreachable when interlaced (`LFR` and
+  `DCTFlicker` are both force-disabled there). Verified byte-identical, and guarded in
+  `tests/refine_passes.sh`.
+
+  This matters more since 0.4.0 raised the progressive ceiling: a release note saying *"`tr` is no
+  longer capped at 6"* invites raising `tr`, and on interlaced content the old code silently gave
+  you 3. The cap is **this package's**, not mvutensils' — it does not move with the dependency floor.
+
+- **`native/build.sh` now writes `libmvuscale.so` next to itself** (`native/`) instead of to a path
+  that only exists in the development tree. The old default was `../tests/_plugins/mvuscale`, and
+  because the script does `mkdir -p`, running the documented build command in a fresh clone silently
+  created an empty `tests/_plugins/` tree. `mvuscale` is the one component you may need to build
+  yourself, so its documented build step should land somewhere that means the same thing in every
+  checkout. `OUT=/dest/dir` overrides it exactly as before.
+
+### Documentation
+- **The module docstring no longer points at a document that is not published.** `help(smdegrain_bis)`
+  now tells you how to actually get the `mvuscale` plugin (the `[uhdhalf]` extra, or build it).
+- **README explains the internal references** some comments and changelog entries carry. They point
+  into the development tree and are kept verbatim so the published sources are a faithful copy rather
+  than a rewritten one; nothing needed to build, install or run the package lives behind them.
+
 ## [0.4.0] — 2026-09-20
 
 ### Changed

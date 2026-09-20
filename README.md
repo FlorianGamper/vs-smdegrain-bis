@@ -323,10 +323,27 @@ The `mvuscale` plugin ships as the per-platform `vapoursynth-mvuscale` wheel, or
 
 ```bash
 pip wheel native/ -w dist/                 # a wheel (scikit-build-core + CMake)
-CXX=g++ bash native/build.sh               # or just the .so → tests/_plugins/mvuscale/libmvuscale.so
+CXX=g++ bash native/build.sh               # or just the .so → native/libmvuscale.so
 ```
 
 Drop the built `.so` into your VapourSynth plugins directory (or set `MVUSCALE_PLUGIN=/path/to/it`).
+
+---
+
+## A note on internal references
+
+This repository is the published subset of a larger development tree: one commit per release, with
+the sources, docs and packaging you need to build and use the package.
+
+Some source comments and changelog entries cite files that are **not** part of that subset — an
+analysis document, the test suite, a frozen reference implementation of the pre-port filter, and the
+release tooling. Those paths will not resolve here. They are provenance markers left where a
+maintainer wanted to record *why* a given constant or code path is what it is, and they are kept
+verbatim so that what ships is a faithful copy of what is developed, rather than a rewritten one.
+
+Nothing required to build, install, or run `smdegrain-bis` lives behind them. If you are chasing the
+reasoning behind a specific behaviour, the [`CHANGELOG.md`](CHANGELOG.md) entry for the release that
+introduced it is the public record, and issues and questions are welcome on the tracker.
 
 ---
 

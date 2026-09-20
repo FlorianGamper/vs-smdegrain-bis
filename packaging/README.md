@@ -17,10 +17,10 @@ prerequisite in `INSTALL.txt` (install via vsrepo / pip / its releases, v4+).
 
 ```bash
 # get the mvuscale binary for this platform (either):
-CXX=g++ native/build.sh                       # -> tests/_plugins/mvuscale/libmvuscale.so
+CXX=g++ native/build.sh                       # -> native/libmvuscale.so
 #   or extract vapoursynth/plugins/mvuscale/<binary> from a vapoursynth-mvuscale wheel
 
-MVUSCALE_BIN=tests/_plugins/mvuscale/libmvuscale.so OS=linux ARCH=x64 \
+MVUSCALE_BIN=native/libmvuscale.so OS=linux ARCH=x64 \
   packaging/make_portable_zip.sh              # -> dist/smdegrain_bis-<ver>-linux-x64.zip
 ```
 

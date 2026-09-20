@@ -8,11 +8,13 @@ lineage, the mvtools→mvutensils port, and how it works.
     from smdegrain_bis import SMDegrain
     out = SMDegrain(clip, tr=2, thSAD=400, RefineMotion=True)
 
-⚠ `UHDhalf=True` requires the native `mvuscale` plugin (native/mvuscale.cpp,
-  built via native/build.sh). See SMDEGRAIN_BIS_IMPROVEMENTS.md §5/§6.
+⚠ `UHDhalf=True` requires the native `mvuscale` plugin. Install it with the
+  extra — `pip install smdegrain-bis[uhdhalf]` — or build it from
+  native/mvuscale.cpp via native/build.sh and drop the .so into your
+  VapourSynth plugins directory.
 """
 
 from .smdegrain import SMDegrain
 
 __all__ = ["SMDegrain"]
-__version__ = "0.4.0"
+__version__ = "0.4.1"
