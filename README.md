@@ -99,7 +99,7 @@ clip`. Crop/pad to mod-4 upstream, or set `UHDhalf=False` for such sources.
 | `thSADC` | auto | chroma SAD threshold (derived from `thSAD` via the v4.x `scaleCSAD` table) |
 | `RefineMotion` | `False` | motion-vector refinement. `False`/`0` = off; `True`/`1` = one `Recalculate` pass at half the block size (Dogway's behaviour); `N` = chain N passes, each halving the block size again (e.g. `blksize=32`, `RefineMotion=2` → 32→16→8), down to the 4×4 floor. Asking for more passes than the block size allows is **clamped** (with a warning) to the deepest that fits, so one setting works across clip sizes. `N≥2` is a `smdegrain_bis` enhancement — the original avsi refines once |
 | `pel` | auto | motion precision (½/¼-pel); auto = `1` on UHD, `2` otherwise |
-| `prefilter` | `-1` | motion-search prefilter (`-1` MinBlur … `5` BM3D, or a clip) |
+| `prefilter` | `-1` | motion-search prefilter: `-1` none, `0`–`2` MinBlur, `3` DFTTest, `4` KNLMeansCL, `5` BM3D, `6` DGDenoise (untested), or a clip |
 | `contrasharp` | auto | contra-sharpen the result toward the source |
 | `UHDhalf` | `True` | half-resolution motion search on >2599×1499 sources (dimensions must be mod-4) |
 | `LFR` | `False` | low-frequency detail restore, gated by a `SADMask` — **[see below](#low-frequency-restore--de-flicker-lfr--dctflicker)** |
@@ -142,18 +142,27 @@ The same hook exists on the standalone helper: `prefilter_clip(clip, mode, tonem
 ### Prefilters (motion search only)
 
 `prefilter` selects the clip motion is estimated on; the result is always degrained from the
-*original*. Pass a **mode** (int or name) or **your own clip**:
+*original*. Pass a **mode** (an int) or **your own clip**:
 
 ```python
-den = SMDegrain(clip, prefilter=-1)          # auto MinBlur (the default)
-den = SMDegrain(clip, prefilter="dfttest")   # DFTTest with a luma mask
-den = SMDegrain(clip, prefilter="knlmeans")  # KNLMeansCL (CUDA / ISPC / OpenCL auto-pick)
-den = SMDegrain(clip, prefilter="bm3d")      # BM3D
-den = SMDegrain(clip, prefilter="dgdenoise") # DGDenoise (DGDecNV)
+den = SMDegrain(clip, prefilter=-1)  # no prefilter (the default; DitherLumaRebuild still applies)
+den = SMDegrain(clip, prefilter=3)   # DFTTest with a luma mask
+den = SMDegrain(clip, prefilter=4)   # KNLMeansCL (CUDA / ISPC / OpenCL auto-pick)
+den = SMDegrain(clip, prefilter=5)   # BM3D (CUDA / CPU auto-pick), luma and chroma
+den = SMDegrain(clip, prefilter=6)   # DGDenoise (DGDecNV) — untested, see below
 
-my_pref = core.bm3dcpu.BM3Dv2(clip, sigma=3.0)   # ... or any prebuilt clip
+from smdegrain_bis.smdegrain import prefilter_clip           # ... or any prebuilt clip
+my_pref = prefilter_clip(clip, "bm3d", planes=[0])           # e.g. luma-only BM3D
 den = SMDegrain(clip, prefilter=my_pref)
 ```
+
+`SMDegrain` takes the mode as an int, as the avsi does; the names (`"dfttest"`, `"knlmeans"`,
+`"bm3d"`, …) are accepted by `prefilter_clip()`. A prebuilt clip must have the input's format.
+The BM3D plugins themselves take 32-bit float only; `prefilter_clip()` converts to float and back
+for you, keeping the clip's range.
+
+Mode `6` (DGDenoise) is **untested**: no DGDecNV install was available, so its plugin namespace and
+argument names (copied from the avsi's AviSynth call) have not been checked.
 
 ### Low-frequency restore & de-flicker (`LFR` / `DCTFlicker`)
 
@@ -235,6 +244,7 @@ Avisynth source.
 - caller-injected `tonemap_fn` (HDR, search-only)
 - public `prefilter_clip()` helper
 - lazily-imported optional deps
+- **BM3D prefilter keeps its denoised chroma** (the avsi discards it — [below](#bm3d-prefilter-chroma))
 
 </td><td>
 
@@ -248,6 +258,42 @@ Avisynth source.
 </table>
 
 The full audit and upgrade roadmap live in the development notes.
+
+### BM3D prefilter chroma
+
+`prefilter=5` follows the avsi's `ex_BM3D(10, 1, "normal")` (its prefilter 8) in everything but
+one point. With chroma on, `ex_BM3D` converts the clip to 4:4:4, runs CBM3D on all three planes
+(chroma at half the luma sigma), and then rebuilds YUV with `CombinePlanes(last, a, planes="YUV")`
+— which takes U and V from the *untouched input*. The denoised chroma is thrown away, so the motion
+search's chroma SAD runs on noisy chroma. That is a regression in the avsi itself: v3.5.7d kept the
+chroma (`MatchClip`), v3.5.8d folded it into the unconditional `CombinePlanes`, and `ex_DGDenoise`
+was fixed for the same case in v4.2.0d but `ex_BM3D` was not.
+
+`smdegrain_bis` keeps the chroma, as intended: bicubic to 4:4:4, CBM3D with sigma `[10, 5, 5]`,
+bicubic back to the source format at each frame's own chroma siting (`_ChromaLocation`; a value
+outside 0..5 raises). The luma comes out bit-identical whether or not the chroma is processed
+(measured with `bm3dcpu`; `bm3dcuda` untested): CBM3D matches on luma, its luma equals plain
+BM3D's for the same input, and both paths convert at 16 bits. The float
+conversion keeps the range, as the avsi's `ConvertBits(32, fulls=!tv, fulld=!tv)` does; an
+expanding conversion would denoise limited-range video at an effective sigma of about 8.6 instead
+of 10. Without chroma (`chroma=False`, GRAY input) it is luma-only BM3D. For Dogway's literal
+output — luma denoised, chroma as input — pass `prefilter_clip(clip, "bm3d", planes=[0])` as the
+prefilter; any plane left out of `planes` is returned untouched.
+
+Cost of the prefilter alone, in frames per second (`bm3dcpu`, YUV420P10 with synthetic noise, a
+6-thread x86-64 host; the median of seven interleaved runs at 1080p and three at 2160p):
+
+| | 1920×1080 | 3840×2160 |
+|---|---|---|
+| luma-only BM3D — the avsi's output, computed without the 4:4:4 trip | 6.4 | 1.0 |
+| **chroma kept (this package)** | **3.8** | **0.23** |
+| the avsi's computation (4:4:4 CBM3D, chroma then discarded) | 3.6 | 0.24 |
+
+Keeping the chroma costs nothing over what the avsi already computes. What costs is the 4:4:4
+CBM3D pass: about 1.7× the luma-only time at 1080p (1.5× to 2.4× across the seven runs, whose
+chroma timings varied most) and about 4.5× at 2160p. The 4:4:4 conversions themselves are cheap
+(15–23 fps at 2160p, source included). Note that the prefilter runs at full resolution here, and
+`UHDhalf` downsizes only after it, whereas the avsi prefilters the half-size clip.
 
 ---
 
@@ -300,9 +346,9 @@ nothing but `mvutensils` loaded).
 | `UHDhalf` (auto on 4K+ sources) | **`mvuscale`** — the `[uhdhalf]` extra / `vapoursynth-mvuscale` |
 | `contrasharp` (auto only when `CClip` is given) | a RemoveGrain provider: **`zsmooth`** *or* **`removegrain`** |
 | `prefilter` ≥ 2 (MinBlur r≥2) | **`ctmf`** |
-| `prefilter` DFTTest | **`dfttest`** (or `akarin` / `vs-dfttest2`) |
+| `prefilter` DFTTest | **`dfttest`** (or `dfttest2_nvrtc` with the `vs-dfttest2` package) |
 | `prefilter` BM3D | **`bm3dcpu`** / **`bm3dcuda`** |
-| `prefilter` DGDenoise | **`dgdecnv`** |
+| `prefilter` DGDenoise (untested) | **`dgdecnv`** |
 | `prefilter` KNLMeans | **`nlm_ispc`** / **`nlm_cuda`** / `knlmeanscl` |
 | `LFR` | **`resize2`** + the `vsrgtools` Python package |
 

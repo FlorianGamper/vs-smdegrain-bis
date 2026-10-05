@@ -35,6 +35,8 @@ from .vendor.sharpen import (Padding, MinBlur, sbr, ContraSharpening,
 #        · frame-prop defaults (range / field / transfer auto-detect)
 #        · caller-injected tonemap_fn (HDR, motion-search only)
 #        · public prefilter_clip() helper, lazily-imported optional deps
+#        · the BM3D prefilter keeps the chroma it denoises (the avsi's ex_BM3D
+#          discards it since v3.5.8d; its ex_DGDenoise keeps it)
 #    Still at v3.1.2d — NOT ported from v4.7.0d:
 #        · adaptive searchparam / pelsearch, explicit plevel=0, hpad/vpad = isHD?0:blksize
 #        · the ~25-mode preset system, and mvtools2-only args (scaleCSAD, temporal)
@@ -95,14 +97,17 @@ def prefilter_clip(input, mode, planes=None, device=None, tonemap_fn=None):
             0 / "minblur0" / "sbr" : MinBlur radius=0 (uses sbr internally)
             1 / "minblur1" / "minblur" : MinBlur radius=1
             2 / "minblur2" : MinBlur radius=2
-            3 / "dfttest" : akarin.DFTTest with luma mask
+            3 / "dfttest" : DFTTest (dfttest2 NVRTC, else core.dfttest)
+                            with a luma mask
             4 / "knlmeans" / "knlmeanscl" : KNLMeansCL (auto-picks
-                                            nlm_ispc/nlm_cuda/knlm via
+                                            nlm_cuda/nlm_ispc/knlm via
                                             runtime detect in helper)
-            5 / "bm3d" : BM3D — placeholder in this commit, implemented
-                        in Task B7
-            6 / "dgdenoise" : DGDecNV DGDenoise — placeholder in this
-                              commit, implemented in Task B8
+            5 / "bm3d" : BM3D (bm3dcuda, else bm3dcpu), Dogway's
+                         ex_BM3D settings; keeps the denoised chroma
+                         when chroma planes are requested (a deviation
+                         from the avsi, see README)
+            6 / "dgdenoise" : DGDecNV DGDenoise — untested (no DGDecNV
+                              host was available to verify it)
       planes: which planes to denoise (default: all planes of input)
       device: GPU device id for KNLMeansCL / BM3D / DGDenoise (default 0).
               Name matches the existing `device` kwarg on vendored
@@ -167,41 +172,74 @@ def prefilter_clip(input, mode, planes=None, device=None, tonemap_fn=None):
     if mode == 4:
         return KNLMeansCL(input, d=1, a=1, h=7, device_id=device)
     if mode == 5:
-        # BM3D — auto-pick cuda → cpu via pick_bm3d_plugin().
-        # Parameters from Dogway's smdegrain-4x.avsi:328 prefilter call
-        # (sigma=10, radius=1, preset="normal" which maps to block_step/
-        # bm_range/ps_range below).
-        bm3d_plugin = pick_bm3d_plugin()
-
-        # Per-plane sigma — luma=10, chroma=sigma/2=5 (matches Dogway's
-        # ex_BM3D: cs = chroma_active ? s/2 : 0). Sigma list length must
-        # match num_planes — grayscale clips get a single-element list.
-        num_planes = input.format.num_planes
-        chroma_active = (1 in planes or 2 in planes) and num_planes > 1
-        if num_planes == 1:
-            sigma_list = [10.0]
-            chroma_kw  = False  # chroma=True on single-plane clip is invalid
+        # BM3D — Dogway's ex_BM3D (avsi:1134-1186) as SMDegrain's prefilter 8 calls it
+        # (avsi:328): sigma 10 (chroma s/2), radius 1, preset "normal".
+        #  · The plugins read block_step / bm_range / ps_range PER PLANE (a 4th value
+        #    is ignored) and CBM3D uses only the first, so "normal"'s [Basic, Final,
+        #    VBasic, VFinal] lists come down to block_step 4 (3 on CUDA, avsi:1164),
+        #    bm_range 16 and ps_range 5. ps_range is a scalar on bm3dcpu, and
+        #    device_id / fast / extractor_exp exist only on bm3dcuda. BM3Dv2
+        #    aggregates the temporal stack itself, so there is no VAggregate.
+        #  · Both plugins take 32-bit float only. ex_BM3D converts with
+        #    ConvertBits(32, fulls=!tv, fulld=!tv) (avsi:1170), which KEEPS the range.
+        #    zimg's int->float conversion expands limited range (luma sigma ~8.6
+        #    instead of 10), and resize ignores range_in once a _Range prop is set,
+        #    so the conversion is a plain x/peak in Expr.
+        #  · Chroma — a deliberate deviation (README, Version & provenance): ex_BM3D
+        #    runs CBM3D on 4:4:4 and then rebuilds YUV from the INPUT's chroma
+        #    (CombinePlanes, avsi:1184), discarding what it denoised — a v3.5.8d
+        #    regression; ex_DGDenoise keeps it. Here it is kept: bicubic to 4:4:4,
+        #    CBM3D, bicubic back to the source format at each frame's own siting.
+        #  · Both paths work at 16 bits (same range; float stays float). CBM3D's luma
+        #    equals plain BM3D's for the same input, so luma comes out bit-identical
+        #    whether or not chroma is processed (measured on bm3dcpu; bm3dcuda
+        #    untested). Planes left out of `planes` are the
+        #    input's, untouched.
+        bm3d = pick_bm3d_plugin()
+        cuda = bm3d.namespace == 'bm3dcuda'
+        kw = dict(radius=1, block_step=3 if cuda else 4, bm_range=16, ps_range=5)
+        if cuda:
+            kw.update(device_id=device if device is not None else 0,
+                      fast=True, extractor_exp=6)
+        fmt = input.format
+        chroma = fmt.num_planes > 1 and (1 in planes or 2 in planes)
+        if chroma:
+            sigma = [10.0 if 0 in planes else 0.0,
+                     5.0 if 1 in planes else 0.0,
+                     5.0 if 2 in planes else 0.0]
+            src = input
+        elif 0 in planes:
+            sigma = [10.0]
+            src = input if fmt.num_planes == 1 else core.std.ShufflePlanes(input, 0, vs.GRAY)
         else:
-            sigma_list = [10.0,
-                          5.0 if chroma_active else 0.0,
-                          5.0 if chroma_active else 0.0]
-            chroma_kw  = chroma_active
+            return input
+        work = src.resize.Bicubic(format=src.format.replace(
+            subsampling_w=0, subsampling_h=0, bits_per_sample=max(fmt.bits_per_sample, 16)).id)
+        wfmt = work.format
+        peak = 1 if wfmt.sample_type == vs.FLOAT else (1 << wfmt.bits_per_sample) - 1
+        den = bm3d.BM3Dv2(core.std.Expr(work, f'x {peak} /',
+                                        format=wfmt.replace(sample_type=vs.FLOAT, bits_per_sample=32).id),
+                          sigma=sigma, chroma=chroma, **kw)
+        den = core.std.Expr(den, f'x {peak} *', format=wfmt.id)
+        sfmt = src.format
+        if sfmt.subsampling_w or sfmt.subsampling_h:
+            # resize drops _ChromaLocation on the 4:4:4 clip and would site the way back at
+            # its default (left), so each frame goes back at its own source siting.
+            downs = [den.resize.Bicubic(format=sfmt.id, chromaloc=loc) for loc in range(6)]
 
-        # BM3DCUDA doesn't have an explicit tv_range kwarg — colorspace
-        # is inferred from the clip's _ColorRange frame prop by the plugin.
-
-        device_id = device if device is not None else 0
-        return bm3d_plugin.BM3Dv2(
-            clip       = input,
-            sigma      = sigma_list,
-            block_step = [4, 3, 4, 3],     # "normal" preset (Dogway 4.x line 1160)
-            bm_range   = [16, 16, 12, 12], # "normal" preset (line 1161)
-            radius     = 1,                # temporal radius (Dogway: r=1 for prefilter)
-            ps_range   = [5, 6],           # "normal" preset (line 1162)
-            chroma     = chroma_kw,
-            device_id  = device_id,
-            fast       = True,
-        )
+            def down_at_siting(n, f):
+                loc = int(f.props.get('_ChromaLocation', 0))
+                if not 0 <= loc < len(downs):
+                    raise vs.Error(f"smdegrain_bis.prefilter_clip: frame {n} has _ChromaLocation={loc}; "
+                                   f"BM3D (mode 5) needs 0..5 to resize its chroma back")
+                return downs[loc]
+            out = core.std.FrameEval(downs[0], down_at_siting, prop_src=input)
+        else:
+            out = den.resize.Bicubic(format=sfmt.id)
+        if fmt.num_planes > 1 and any(p not in planes for p in range(3)):
+            out = core.std.ShufflePlanes([out if p in planes else input for p in range(3)],
+                                         [0, 1, 2], fmt.color_family)
+        return core.std.CopyFrameProps(out, input)
     if mode == 6:
         # DGDenoise — CUDA-only, user-installed (DGDecNV license).
         # Parameters from Dogway's smdegrain-4x.avsi:327 prefilter call site +
@@ -1124,14 +1162,22 @@ def KNLMeansCL(
     if not isinstance(clip, vs.VideoNode):
         raise vs.Error('KNLMeansCL: this is not a clip')
 
-    if clip.format.color_family != vs.YUV:
-        raise vs.Error('KNLMeansCL: this wrapper is intended to be used only for YUV format')
+    if clip.format.color_family not in (vs.YUV, vs.GRAY):
+        raise vs.Error('KNLMeansCL: this wrapper is intended to be used only for YUV and GRAY formats')
 
     # device_id=None means "use the default device"; mirror Dogway's
     # smdegrain-4x.avsi:1275 `Default(gpuid, 0)` and the BM3D dispatch
     # normalization at prefilter_clip mode 5.
     if device_id is None:
         device_id = 0
+
+    # GRAY: one channels='Y' pass (nlm_ispc refuses channels='YUV' on a GRAY clip).
+    if clip.format.color_family == vs.GRAY:
+        if hasattr(core, 'nlm_cuda'):
+            return clip.nlm_cuda.NLMeans(d=d, a=a, s=s, h=h, channels='Y', wmode=wmode, wref=wref, device_id=device_id)
+        if hasattr(core, 'nlm_ispc'):
+            return clip.nlm_ispc.NLMeans(d=d, a=a, s=s, h=h, channels='Y', wmode=wmode, wref=wref)
+        return clip.knlm.KNLMeansCL(d=d, a=a, s=s, h=h, channels='Y', wmode=wmode, wref=wref, device_type=device_type, device_id=device_id)
 
     subsampled = clip.format.subsampling_w > 0 or clip.format.subsampling_h > 0
     # Dispatch order: nlm_cuda → nlm_ispc → knlm. Caller's gpu=true intent

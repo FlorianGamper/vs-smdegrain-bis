@@ -6,6 +6,51 @@ Notable changes to `smdegrain_bis`. Format follows
 
 ## [Unreleased]
 
+## [0.4.2] — 2026-10-05
+
+### Fixed
+- **`prefilter=5` (BM3D) runs.** It never did: every call raised `BM3Dv2: Function does not take
+  argument(s) named device_id, fast`. Four faults were stacked, each hidden by the one before it:
+  `device_id` and `fast` exist only on `bm3dcuda`; `bm3dcpu` takes `ps_range` as a scalar, not
+  `[5, 6]`; both plugins take 32-bit float only, and the integer clip was passed as is; and
+  `chroma=True` needs 4:4:4, while the clip was 4:2:0. So the CUDA plugin failed too, one layer
+  further in. The mode now does what the avsi's `ex_BM3D(10, 1, "normal")` does:
+  - sigma 10 on luma (5 on chroma) and radius 1;
+  - block_step 4 (3 on CUDA), bm_range 16 and ps_range 5. The plugins read these per plane and
+    CBM3D uses only the first value, so the preset's four-element lists come down to these;
+  - `device_id`, `fast=True` and `extractor_exp=6` on `bm3dcuda` only;
+  - a range-keeping float conversion (`x / peak`). `ex_BM3D`'s `ConvertBits(32, fulls=!tv,
+    fulld=!tv)` keeps limited range limited, whereas zimg's float conversion expands it, which
+    would denoise limited-range video at an effective sigma of about 8.6 instead of 10.
+
+  `BM3Dv2` aggregates the temporal stack itself, so there is no `VAggregate` step. Nothing that
+  worked before changes: the default prefilter is `-1`, and modes 0–4 on YUV are untouched.
+- **`prefilter=4` (KNLMeansCL) runs on GRAY clips.** It raised `KNLMeansCL: this wrapper is
+  intended to be used only for YUV format`. A GRAY clip now gets one `channels='Y'` pass on
+  whichever backend is present.
+
+### Changed
+- **The BM3D prefilter keeps the chroma it denoises.** This deliberately deviates from the avsi.
+  `ex_BM3D` runs CBM3D on 4:4:4 and then takes U and V from the untouched input
+  (`CombinePlanes`), which throws the denoised chroma away. That is a v3.5.8d regression in the
+  avsi: `ex_DGDenoise` keeps chroma in the same case. Here the clip goes to 4:4:4 with bicubic
+  chroma, through CBM3D (sigma `[10, 5, 5]`), and back to the source format at each frame's own
+  chroma siting; a `_ChromaLocation` outside 0..5 raises, naming the value. The luma is
+  bit-identical either way (measured with `bm3dcpu`; `bm3dcuda` untested): both paths convert at
+  16 bits, and CBM3D's luma equals plain BM3D's for the same input. A plane left out of `planes`
+  comes back untouched.
+  For Dogway's literal output, pass `prefilter_clip(clip, "bm3d", planes=[0])` as the prefilter.
+  Reasons and cost: README, *BM3D prefilter chroma*.
+
+### Documentation
+- README: `prefilter=-1` means no prefilter, not "auto MinBlur". The `SMDegrain(prefilter="…")`
+  examples raised, because `SMDegrain` takes an int (the names belong to `prefilter_clip()`). The
+  prebuilt-clip example used `core.bm3dcpu.BM3Dv2` on an integer clip, which raises. Mode 6
+  (DGDenoise) is marked untested: no DGDecNV install was available to check it. The plugin table
+  no longer lists `akarin` as a DFTTest backend.
+- The `prefilter_clip()` docstring no longer calls modes 5 and 6 placeholders, and it names
+  DFTTest's real backends.
+
 ## [0.4.1] — 2026-09-20
 
 ### Changed
